@@ -1,7 +1,6 @@
 /*
  * Arizona MFD internals
  *
- * Copyright 2014 CirrusLogic, Inc.
  * Copyright 2012 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
@@ -28,11 +27,6 @@ enum arizona_type {
 	WM8280 = 4,
 	WM8998 = 5,
 	WM1814 = 6,
-	WM8285 = 7,
-	WM1840 = 8,
-	WM1831 = 9,
-	CS47L24 = 10,
-	CS47L35 = 11,
 };
 
 #define ARIZONA_IRQ_GP1                    0
@@ -57,6 +51,9 @@ enum arizona_type {
 #define ARIZONA_IRQ_DSP_IRQ8              19
 #define ARIZONA_IRQ_SPK_OVERHEAT_WARN     20
 #define ARIZONA_IRQ_SPK_OVERHEAT          21
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+#define ARIZONA_IRQ_SPK_SHUTDOWN_WARN     20
+#endif
 #define ARIZONA_IRQ_MICDET                22
 #define ARIZONA_IRQ_HPDET                 23
 #define ARIZONA_IRQ_WSEQ_DONE             24
@@ -110,19 +107,25 @@ enum arizona_type {
 #define ARIZONA_IRQ_HP1R_SC_POS           72
 #define ARIZONA_IRQ_HP1L_SC_NEG           73
 #define ARIZONA_IRQ_HP1L_SC_POS           74
-#define ARIZONA_IRQ_FLL3_LOCK             75
-#define ARIZONA_IRQ_FLL3_CLOCK_OK         76
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+#define ARIZONA_IRQ_FLL3_LOCK             75 
+#define ARIZONA_IRQ_FLL3_CLOCK_OK         76 
 
-#define ARIZONA_NUM_IRQ                   77
+#define ARIZONA_NUM_IRQ                   77  
+#else
+#define ARIZONA_NUM_IRQ                   75
+#endif
 
 #define ARIZONA_HP_SHORT_IMPEDANCE        4
 struct snd_soc_dapm_context;
-struct arizona_extcon_info;
 
 struct arizona {
 	struct regmap *regmap;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	struct regmap *regmap_32bit;
+#endif
 
+	
 	struct device *dev;
 
 	enum arizona_type type;
@@ -131,7 +134,6 @@ struct arizona {
 	int num_core_supplies;
 	struct regulator_bulk_data core_supplies[ARIZONA_MAX_CORE_SUPPLIES];
 	struct regulator *dcvdd;
-	struct notifier_block dcvdd_notifier;
 
 	struct arizona_pdata pdata;
 
@@ -142,19 +144,28 @@ struct arizona {
 	struct irq_domain *virq;
 	struct regmap_irq_chip_data *aod_irq_chip;
 	struct regmap_irq_chip_data *irq_chip;
-
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+	bool hpdet_magic; 
+#endif
 	bool hpdet_clamp;
 	unsigned int hp_ena;
 
 	unsigned int hp_impedance;
-	struct arizona_extcon_info *extcon_info;
 
 	struct mutex clk_lock;
 	int clk32k_ref;
 
 	struct mutex subsys_max_lock;
 	unsigned int subsys_max_rq;
-	bool subsys_max_cached;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+	bool subsys_max_cached;	
+#endif
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)
+	unsigned char arizona_is_suspend;
+	#if defined(CONFIG_FB)
+	struct notifier_block fb_notif;
+	#endif
+#endif
 
 	struct snd_soc_dapm_context *dapm;
 
@@ -165,13 +176,9 @@ struct arizona {
 
 	uint16_t out_comp_coeff;
 	uint8_t out_comp_enabled;
-
-	bool micvdd_regulated;
-#if defined(CONFIG_PM_SLEEP) && defined(CONFIG_MFD_ARIZONA_DEFERRED_RESUME)
-	struct work_struct deferred_resume_work;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+	bool bypass_cache; 
 #endif
-
-	struct mutex rate_lock;
 };
 
 #define ARIZONA_DVFS_SR1_RQ          0x00000001
@@ -194,10 +201,12 @@ int arizona_set_irq_wake(struct arizona *arizona, int irq, int on);
 int wm5102_patch(struct arizona *arizona);
 int florida_patch(struct arizona *arizona);
 int wm8997_patch(struct arizona *arizona);
-int vegas_patch(struct arizona *arizona);
-int clearwater_patch(struct arizona *arizona);
-int largo_patch(struct arizona *arizona);
-int marley_patch(struct arizona *arizona);
+int wm8998_patch(struct arizona *arizona);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+int wm8285_patch(struct arizona *arizona); 
+int cs47l24_patch(struct arizona *arizona); 
+int wm5110_patch(struct arizona *arizona); 
+#endif
 
 extern int arizona_of_get_named_gpio(struct arizona *arizona, const char *prop,
 				     bool mandatory);
@@ -210,9 +219,4 @@ extern void arizona_florida_mute_analog(struct arizona* arizona,
 					unsigned int mute);
 extern void arizona_florida_clear_input(struct arizona *arizona);
 
-static inline int arizona_of_read_s32(struct arizona *arizona, const char *prop,
-				      bool mandatory, s32 *data)
-{
-	return arizona_of_read_u32(arizona, prop, mandatory, (u32 *)data);
-}
 #endif
