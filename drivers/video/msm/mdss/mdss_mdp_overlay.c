@@ -1524,25 +1524,19 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 
 	if (mfd->panel.type == WRITEBACK_PANEL) {
 		ATRACE_BEGIN("wb_kickoff");
-		if (!need_cleanup) {
-			commit_cb.commit_cb_fnc = mdss_mdp_commit_cb;
-			commit_cb.data = mfd;
-			ret = mdss_mdp_wb_kickoff(mfd, &commit_cb);
-		} else {
-			mdss_mdp_wb_kickoff(mfd, NULL);
-		}
+		ret = mdss_mdp_wb_kickoff(mfd);
 		ATRACE_END("wb_kickoff");
+	} else if (!need_cleanup) {
+		ATRACE_BEGIN("display_commit");
+		commit_cb.commit_cb_fnc = mdss_mdp_commit_cb;
+		commit_cb.data = mfd;
+		ret = mdss_mdp_display_commit(mdp5_data->ctl, NULL,
+			&commit_cb);
+		ATRACE_END("display_commit");
 	} else {
 		ATRACE_BEGIN("display_commit");
-		if (!need_cleanup) {
-			commit_cb.commit_cb_fnc = mdss_mdp_commit_cb;
-			commit_cb.data = mfd;
-			ret = mdss_mdp_display_commit(mdp5_data->ctl, NULL,
-				&commit_cb);
-		} else  {
-			ret = mdss_mdp_display_commit(mdp5_data->ctl, NULL,
-				NULL);
-		}
+		ret = mdss_mdp_display_commit(mdp5_data->ctl, NULL,
+			NULL);
 		ATRACE_END("display_commit");
 	}
 
@@ -1968,27 +1962,37 @@ static void mdss_mdp_overlay_pan_display(struct msm_fb_data_type *mfd)
 		goto pan_display_error;
 	}
 
+	//ret = mdss_mdp_overlay_start(mfd);
 	ret = mdss_mdp_overlay_get_fb_pipe(mfd, &pipe,
-					MDSS_MDP_MIXER_MUX_LEFT);
+		 		 		 		 		 MDSS_MDP_MIXER_MUX_LEFT);
 	if (ret) {
+		//pr_err("unable to start overlay %d (%d)\n", mfd->index, ret);
 		pr_err("unable to allocate base pipe\n");
 		goto pan_display_error;
 	}
 
+	//ret = mdss_iommu_ctrl(1);
+	//if (IS_ERR_VALUE(ret)) {
+		//pr_err("IOMMU attach failed\n");
 	if (mdss_mdp_pipe_map(pipe)) {
-		pr_err("unable to map base pipe\n");
+		  pr_err("unable to map base pipe\n");
 		goto pan_display_error;
 	}
 
+	//ret = mdss_mdp_overlay_get_fb_pipe(mfd, &pipe,
+	//				MDSS_MDP_MIXER_MUX_LEFT);
 	ret = mdss_mdp_overlay_start(mfd);
 	if (ret) {
+		//pr_err("unable to allocate base pipe\n");
 		pr_err("unable to start overlay %d (%d)\n", mfd->index, ret);
 		goto pan_display_error;
 	}
 
+	//if (mdss_mdp_pipe_map(pipe)) {
+	//	pr_err("unable to map base pipe\n");
 	ret = mdss_iommu_ctrl(1);
 	if (IS_ERR_VALUE(ret)) {
-		pr_err("IOMMU attach failed\n");
+		pr_err("IOMMU attach failed\n");	
 		goto pan_display_error;
 	}
 

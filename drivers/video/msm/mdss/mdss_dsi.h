@@ -98,9 +98,6 @@ enum dsi_panel_status_mode {
 	ESD_REG,
 	ESD_REG_NT35596,
 	ESD_TE,
-#ifdef CONFIG_MACH_YULONG
-	ESD_REG_YL,
-#endif
 	ESD_MAX,
 };
 
@@ -183,7 +180,6 @@ enum dsi_pm_type {
 
 #define DSI_DATA_LANES_STOP_STATE	0xF
 #define DSI_CLK_LANE_STOP_STATE		BIT(4)
-#define DSI_DATA_LANES_ENABLED		0xF0
 
 /* offsets for dynamic refresh */
 #define DSI_DYNAMIC_REFRESH_CTRL		0x200
@@ -245,19 +241,6 @@ struct dsi_panel_cmds {
 	int link_state;
 };
 
-#ifdef CONFIG_MACH_YULONG
-struct status_reg {
-	u8 reg;
-	u8 num_vals;
-	u8 *vals;
-};
-
-struct dsi_panel_status_regs {
-	size_t num_regs;
-	struct status_reg *regs;
-};
-#endif
-
 struct dsi_kickoff_action {
 	struct list_head act_entry;
 	void (*action) (void *);
@@ -301,7 +284,6 @@ enum {
 #define DSI_EV_MDP_FIFO_UNDERFLOW	0x0002
 #define DSI_EV_DSI_FIFO_EMPTY		0x0004
 #define DSI_EV_DLNx_FIFO_OVERFLOW	0x0008
-#define DSI_EV_LP_RX_TIMEOUT		0x0010
 #define DSI_EV_STOP_HS_CLK_LANE		0x40000000
 #define DSI_EV_MDP_BUSY_RELEASE		0x80000000
 
@@ -375,21 +357,6 @@ struct mdss_dsi_ctrl_pdata {
 
 	struct dsi_panel_cmds on_cmds;
 	struct dsi_panel_cmds off_cmds;
-
-#ifdef CONFIG_MACH_YULONG
-	struct dsi_panel_cmds ce_cmds;
-	struct dsi_panel_cmds ce_off_cmds;
-	struct dsi_panel_cmds ce_level1_cmds;
-	struct dsi_panel_cmds ce_level2_cmds;
-	struct dsi_panel_cmds ce_level3_cmds;
-	struct dsi_panel_cmds ce_level4_cmds;
-	struct dsi_panel_cmds cabc_ui_cmds;
-	struct dsi_panel_cmds cabc_still_cmds;
-	struct dsi_panel_cmds cabc_moving_cmds;
-	struct dsi_panel_cmds cabc_off_cmds;
-	struct dsi_panel_status_regs status_regs;
-#endif
-
 	struct dsi_panel_cmds status_cmds;
 	u32 status_cmds_rlen;
 	u32 status_value;

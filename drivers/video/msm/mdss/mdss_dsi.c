@@ -23,6 +23,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/leds-qpnp-wled.h>
 #include <linux/clk.h>
+#include <linux/pm_qos.h>
 
 #include "mdss.h"
 #include "mdss_panel.h"
@@ -30,6 +31,28 @@
 #include "mdss_debug.h"
 
 #define XO_CLK_RATE	19200000
+#define DSI_DISABLE_PC_LATENCY 100
+#define DSI_ENABLE_PC_LATENCY PM_QOS_DEFAULT_VALUE
+static struct pm_qos_request mdss_dsi_pm_qos_request;
+
+static void mdss_dsi_pm_qos_add_request(void)
+{
+	pr_debug("%s: add request",__func__);
+	pm_qos_add_request(&mdss_dsi_pm_qos_request, PM_QOS_CPU_DMA_LATENCY,
+		PM_QOS_DEFAULT_VALUE);
+}
+
+static void mdss_dsi_pm_qos_remove_request(void)
+{
+	pr_debug("%s: remove request",__func__);
+	pm_qos_remove_request(&mdss_dsi_pm_qos_request);
+}
+
+static void mdss_dsi_pm_qos_update_request(int val)
+{
+	pr_debug("%s: update request %d",__func__,val);
+	pm_qos_update_request(&mdss_dsi_pm_qos_request, val);
+}
 
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 					bool active);
@@ -64,10 +87,6 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 	return rc;
 }
 
-#if defined(CONFIG_MACH_YULONG) && defined(CONFIG_YL_TPS65132)
-extern void tps65132_config_set_to_tablet_mode(void);
-extern void tps65132_config_proc(void);
-#endif
 static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -171,18 +190,11 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		!pdata->panel_info.mipi.lp11_init) {
 		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
 			pr_debug("reset enable: pinctrl not enabled\n");
-#if defined(CONFIG_MACH_YULONG) && defined(CONFIG_YL_TPS65132)
-		if (pdata->panel_info.mipi.has_tps65132)
-			tps65132_config_set_to_tablet_mode();
-#endif
+
 		ret = mdss_dsi_panel_reset(pdata, 1);
 		if (ret)
 			pr_err("%s: Panel reset failed. rc=%d\n",
 					__func__, ret);
-#if defined(CONFIG_MACH_YULONG) && defined(CONFIG_YL_TPS65132)
-		if (pdata->panel_info.mipi.has_tps65132)
-			tps65132_config_proc();
-#endif
 	}
 
 error:
@@ -475,12 +487,6 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata, int power_state)
 
 	panel_info = &ctrl_pdata->panel_data.panel_info;
 
-#if defined(CONFIG_MACH_CP8675)
-	/*add set reset low by liujianfeng3@yulong.com for yashi nt35596 lcd error display*/
-	gpio_set_value((ctrl_pdata->rst_gpio), 0);
-	usleep(100 * 1000);
-#endif
-
 	pr_debug("%s+: ctrl=%p ndx=%d power_state=%d\n",
 		__func__, ctrl_pdata, ctrl_pdata->ndx, power_state);
 
@@ -555,6 +561,9 @@ static int mdss_dsi_update_panel_config(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 int mdss_dsi_on(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
+	#ifdef CONFIG_L8720_COMMON
+	u32 tmp;
+	#endif
 	struct mdss_panel_info *pinfo;
 	struct mipi_panel_info *mipi;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -614,20 +623,17 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 	if (mipi->lp11_init) {
 		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
 			pr_debug("reset enable: pinctrl not enabled\n");
-#if defined(CONFIG_MACH_YULONG) && defined(CONFIG_YL_TPS65132)
-		if (mipi->has_tps65132)
-			tps65132_config_set_to_tablet_mode();
-#endif
 		mdss_dsi_panel_reset(pdata, 1);
-#if defined(CONFIG_MACH_YULONG) && defined(CONFIG_YL_TPS65132)
-		if (mipi->has_tps65132)
-			tps65132_config_proc();
-#endif
 	}
 
 	if (mipi->init_delay)
 		usleep(mipi->init_delay);
-
+#ifdef CONFIG_L8720_COMMON
+    tmp = MIPI_INP((ctrl_pdata->ctrl_base) + 0xac);
+    tmp |= (1<<28);
+    MIPI_OUTP((ctrl_pdata->ctrl_base) + 0xac, tmp);
+    wmb();
+#else
 	if (mipi->force_clk_lane_hs) {
 		u32 tmp;
 
@@ -636,7 +642,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 		MIPI_OUTP((ctrl_pdata->ctrl_base) + 0xac, tmp);
 		wmb();
 	}
-
+#endif
 	if (pdata->panel_info.type == MIPI_CMD_PANEL)
 		mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
 
@@ -716,6 +722,8 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 	pr_debug("%s+: ctrl=%p ndx=%d cur_blank_state=%d\n", __func__,
 		ctrl_pdata, ctrl_pdata->ndx, pdata->panel_info.blank_state);
 
+	mdss_dsi_pm_qos_update_request(DSI_DISABLE_PC_LATENCY);
+
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 
 	if (pdata->panel_info.blank_state == MDSS_PANEL_BLANK_LOW_POWER) {
@@ -746,6 +754,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 
 error:
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
+	mdss_dsi_pm_qos_update_request(DSI_ENABLE_PC_LATENCY);
 	pr_debug("%s-:\n", __func__);
 
 	return ret;
@@ -1545,6 +1554,7 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		}
 		disable_irq(gpio_to_irq(ctrl_pdata->disp_te_gpio));
 	}
+	mdss_dsi_pm_qos_add_request();
 	pr_debug("%s: Dsi Ctrl->%d initialized\n", __func__, index);
 	return 0;
 
@@ -1571,6 +1581,8 @@ static int mdss_dsi_ctrl_remove(struct platform_device *pdev)
 		pr_err("%s: no driver data\n", __func__);
 		return -ENODEV;
 	}
+
+	mdss_dsi_pm_qos_remove_request();
 
 	for (i = DSI_MAX_PM - 1; i >= 0; i--) {
 		if (msm_dss_config_vreg(&pdev->dev,
@@ -1867,9 +1879,6 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	ctrl_pdata->panel_data.event_handler = mdss_dsi_event_handler;
 
 	if (ctrl_pdata->status_mode == ESD_REG ||
-#ifdef CONFIG_MACH_YULONG
-			ctrl_pdata->status_mode == ESD_REG_YL ||
-#endif
 			ctrl_pdata->status_mode == ESD_REG_NT35596)
 		ctrl_pdata->check_status = mdss_dsi_reg_status_check;
 	else if (ctrl_pdata->status_mode == ESD_BTA)
