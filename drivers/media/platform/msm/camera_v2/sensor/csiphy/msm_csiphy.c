@@ -175,6 +175,11 @@ static int msm_csiphy_lane_config(struct csiphy_device *csiphy_dev,
 		msm_camera_io_w(csiphy_params->settle_cnt,
 			csiphybase + csiphy_dev->ctrl_reg->csiphy_reg.
 			mipi_csiphy_lnn_cfg3_addr + 0x40*j);
+	// add for hynix	
+		msm_camera_io_w(0x0b,
+			csiphybase + csiphy_dev->ctrl_reg->csiphy_reg.
+			mipi_csiphy_lnn_cfg4_addr + 0x40*j);
+		
 		msm_camera_io_w(csiphy_dev->ctrl_reg->csiphy_reg.
 			mipi_csiphy_interrupt_mask_val, csiphybase +
 			csiphy_dev->ctrl_reg->csiphy_reg.
@@ -457,7 +462,6 @@ static int msm_csiphy_init(struct csiphy_device *csiphy_dev)
 	else
 		csiphy_dev->hw_version = csiphy_dev->hw_dts_version;
 
-	csiphy_dev->csiphy_sof_freeze = 0;
 	CDBG("%s:%d called csiphy_dev->hw_version 0x%x\n", __func__, __LINE__,
 		csiphy_dev->hw_version);
 	csiphy_dev->csiphy_state = CSIPHY_POWER_UP;
@@ -666,7 +670,6 @@ static int32_t msm_csiphy_cmd(struct csiphy_device *csiphy_dev, void *arg)
 			rc = -EFAULT;
 			break;
 		}
-		csiphy_dev->csiphy_sof_freeze = 0;
 		rc = msm_csiphy_lane_config(csiphy_dev, &csiphy_params);
 		break;
 	case CSIPHY_RELEASE:
@@ -677,8 +680,6 @@ static int32_t msm_csiphy_cmd(struct csiphy_device *csiphy_dev, void *arg)
 			rc = -EFAULT;
 			break;
 		}
-		if (csiphy_dev->csiphy_sof_freeze == 1)
-			disable_irq(csiphy_dev->irq->start);
 		rc = msm_csiphy_release(csiphy_dev, &csi_lane_params);
 		break;
 	default:
@@ -720,14 +721,6 @@ static long msm_csiphy_subdev_ioctl(struct v4l2_subdev *sd,
 	case MSM_SD_SHUTDOWN:
 		rc = msm_csiphy_release(csiphy_dev, arg);
 		break;
-	case MSM_SD_NOTIFY_FREEZE: {
-		if (!csiphy_dev || !csiphy_dev->ctrl_reg ||
-				!csiphy_dev->ref_count)
-			break;
-		csiphy_dev->csiphy_sof_freeze = 1;
-		enable_irq(csiphy_dev->irq->start);
-		break;
-	   }
 	default:
 		pr_err_ratelimited("%s: command not found\n", __func__);
 	}

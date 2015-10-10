@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,21 +22,10 @@
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 
 static struct v4l2_file_operations msm_sensor_v4l2_subdev_fops;
-
-#ifdef CONFIG_MACH_YULONG
-static bool sensor_probed[2];
-static bool sensor_otp_prepared[2];
-#endif
-
-#ifdef CONFIG_MACH_CKT
-static uint32_t g_camera_id = 0;
-
-uint32_t get_camera_id(void)
-{
-	return g_camera_id;
-}
-#endif
-
+extern uint8_t g_imx214_otp_module_id;
+extern uint8_t g_ov5670_otp_module_id ;
+extern uint8_t g_s5k3l2_otp_module_id;
+extern uint8_t g_s5k5e2_otp_module_id;
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
 {
 	int idx;
@@ -507,9 +496,7 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	struct msm_camera_i2c_client *sensor_i2c_client;
 	struct msm_camera_slave_info *slave_info;
 	const char *sensor_name;
-#ifdef CONFIG_MACH_YULONG
-	int position;
-#endif
+
 	if (!s_ctrl) {
 		pr_err("%s:%d failed: %p\n",
 			__func__, __LINE__, s_ctrl);
@@ -530,9 +517,6 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 		sensor_i2c_client, slave_info->sensor_id_reg_addr,
 		&chipid, MSM_CAMERA_I2C_WORD_DATA);
 	if (rc < 0) {
-#ifdef CONFIG_MACH_YULONG
-		sensor_probed[s_ctrl->sensordata->sensor_info->position] = false;
-#endif
 		pr_err("%s: %s: read id failed\n", __func__, sensor_name);
 		return rc;
 	}
@@ -543,24 +527,6 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 		pr_err("msm_sensor_match_id chip id doesnot match\n");
 		return -ENODEV;
 	}
-#ifdef CONFIG_MACH_YULONG
-	position = s_ctrl->sensordata->sensor_info->position;
-	CDBG("sensor info: name: %s sensor_otp_prepared: %d\n",
-		s_ctrl->sensordata->sensor_name, sensor_otp_prepared[position]);
-	if(s_ctrl->func_tbl->sensor_prepare_otp && !sensor_otp_prepared[position]) {
-		rc = s_ctrl->func_tbl->sensor_prepare_otp(s_ctrl);
-		if (rc) {
-			pr_err("sensor_prepare_otp failed\n");
-		} else {
-			CDBG("sensor OTP prepared");
-			sensor_otp_prepared[position] = true;
-		}
-	}
-
-	if(!(s_ctrl->module_id & (0xFFFF << 16)))
-		s_ctrl->module_id |= (chipid << 16);
-	sensor_probed[s_ctrl->sensordata->sensor_info->position] = true;
-#endif
 	return rc;
 }
 
@@ -617,8 +583,6 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 	case MSM_SD_SHUTDOWN:
 		msm_sensor_stop_stream(s_ctrl);
 		return 0;
-	case MSM_SD_NOTIFY_FREEZE:
-		return 0;
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -644,11 +608,7 @@ long msm_sensor_subdev_fops_ioctl(struct file *file,
 	return video_usercopy(file, cmd, arg, msm_sensor_subdev_do_ioctl);
 }
 
-#ifdef CONFIG_MACH_YULONG
-int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
-#else
 static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
-#endif
 	void __user *argp)
 {
 	struct sensorb_cfg_data32 *cdata = (struct sensorb_cfg_data32 *)argp;
@@ -731,7 +691,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		conf_array.delay = conf_array32.delay;
 		conf_array.size = conf_array32.size;
 		conf_array.reg_setting = compat_ptr(conf_array32.reg_setting);
-		conf_array.qup_i2c_batch = conf_array32.qup_i2c_batch;
 
 		if (!conf_array.size) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
@@ -764,19 +723,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		kfree(reg_setting);
 		break;
 	}
-#ifdef CONFIG_MACH_YULONG
-	case CFG_UPDATE_OTP: {
-		if(s_ctrl->func_tbl->sensor_update_otp) {
-			rc = s_ctrl->func_tbl->sensor_update_otp(s_ctrl);
-			if (rc) {
-				pr_err("sensor_update_otp failed\n");
-				break;
-			}
-			cdata->cfg.sensor_init_params.module_id = s_ctrl->module_id;
-		}
-		break;
-	}
-#endif
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
 		uint16_t local_data = 0;
@@ -883,9 +829,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	}
 
 	case CFG_POWER_UP:
-#ifdef CONFIG_MACH_CKT
-		g_camera_id = s_ctrl->sensordata->cam_slave_info->camera_id;
-#endif
 		if (s_ctrl->sensor_state != MSM_SENSOR_POWER_DOWN) {
 			pr_err("%s:%d failed: invalid state %d\n", __func__,
 				__LINE__, s_ctrl->sensor_state);
@@ -903,9 +846,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
-#ifdef CONFIG_MACH_YULONG
-			cdata->cfg.sensor_init_params.module_id = s_ctrl->module_id;
-#endif
 			CDBG("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
@@ -913,10 +853,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	case CFG_POWER_DOWN:
-#ifdef CONFIG_MACH_CKT
-		/* Reset active camera to back camera for torch */
-		g_camera_id = 0;
-#endif
 		kfree(s_ctrl->stop_setting.reg_setting);
 		s_ctrl->stop_setting.reg_setting = NULL;
 		if (s_ctrl->sensor_state != MSM_SENSOR_POWER_UP) {
@@ -959,7 +895,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		stop_setting->data_type = stop_setting32.data_type;
 		stop_setting->delay = stop_setting32.delay;
 		stop_setting->size = stop_setting32.size;
-		stop_setting->qup_i2c_batch = stop_setting32.qup_i2c_batch;
 
 		reg_setting = compat_ptr(stop_setting32.reg_setting);
 
@@ -1104,19 +1039,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		kfree(reg_setting);
 		break;
 	}
-#ifdef CONFIG_MACH_YULONG
-	case CFG_UPDATE_OTP: {
-		if(s_ctrl->func_tbl->sensor_update_otp) {
-			rc = s_ctrl->func_tbl->sensor_update_otp(s_ctrl);
-			if (rc) {
-				pr_err("sensor_update_otp failed\n");
-				break;
-			}
-			cdata->cfg.sensor_init_params.module_id = s_ctrl->module_id;
-		}
-		break;
-	}
-#endif
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
 		uint16_t local_data = 0;
@@ -1311,9 +1233,6 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
-#ifdef CONFIG_MACH_YULONG
-			cdata->cfg.sensor_init_params.module_id = s_ctrl->module_id;
-#endif
 			pr_err("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
@@ -1405,6 +1324,86 @@ int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl)
 		rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
 	else
 		rc = msm_sensor_match_id(s_ctrl);
+	if((rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) && ((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_truly") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"imx214_olqba15") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"imx214_f13n05e") == 0)))
+	{
+		pr_err("%s:g_imx214_otp_module_id = %x\n", __func__,g_imx214_otp_module_id);
+		if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916") == 0) && (g_imx214_otp_module_id == 0x7))
+		{
+			pr_err("%s:it is ofilm imx214\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_truly") == 0) && (g_imx214_otp_module_id == 0x2))
+		{
+			pr_err("%s:it is truly imx214\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_olqba15") == 0) && (g_imx214_otp_module_id == 0x7))
+		{
+			pr_err("%s:it is ofilm imx214_olqba15\n", __func__);
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_f13n05e") == 0) && (g_imx214_otp_module_id == 0x1))
+		{
+			pr_err("%s:it is sunny imx214_f13n05e\n", __func__);
+		}
+		else
+		{
+			pr_err("%s:it is not support imx214 s_ctrl->sensordata->sensor_name =%s\n", __func__,s_ctrl->sensordata->sensor_name);
+			rc = -ENODEV;
+		}
+	}
+	else if((rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) && ((strcmp(s_ctrl->sensordata->sensor_name,"ov5670_q5v41b") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"ov5670_avc")) == 0))
+	{
+		pr_err("%s:g_ov5670_otp_module_id = %x\n", __func__,g_ov5670_otp_module_id);
+		if((strcmp(s_ctrl->sensordata->sensor_name,"ov5670_q5v41b") == 0) && (g_ov5670_otp_module_id == 0x7))
+		{
+			pr_err("%s:it is ofilm ov5670\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"ov5670_avc") == 0) && (g_ov5670_otp_module_id == 0x18))
+		{
+			pr_err("%s:it is avc ov5670\n", __func__);	
+		}
+		else
+		{
+			pr_err("%s:it is not support ov5670 s_ctrl->sensordata->sensor_name =%s\n", __func__,s_ctrl->sensordata->sensor_name);
+			rc = -ENODEV;
+		}
+	}
+	else if((rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) && ((strcmp(s_ctrl->sensordata->sensor_name,"s5k3l2") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"s5k3l2_avc")) == 0))
+	{
+		pr_err("%s:g_s5k3l2_otp_module_id = %x\n", __func__,g_s5k3l2_otp_module_id);
+		if((strcmp(s_ctrl->sensordata->sensor_name,"s5k3l2") == 0) && (g_s5k3l2_otp_module_id == 0x7))
+		{
+			pr_err("%s:it is ofilm s5k3l2\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"s5k3l2_avc") == 0) && (g_s5k3l2_otp_module_id == 0x18))
+		{
+			pr_err("%s:it is avc s5k3l2\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"s5k3l2_primax") == 0) && (g_s5k3l2_otp_module_id == 0x1))
+		{
+			pr_err("%s:it is primax s5k3l2\n", __func__);	
+		}
+		else
+		{
+			pr_err("%s:it is not support s5k3l2 s_ctrl->sensordata->sensor_name =%s\n", __func__,s_ctrl->sensordata->sensor_name);
+			rc = -ENODEV;
+		}
+	}
+	else if((rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) && ((strcmp(s_ctrl->sensordata->sensor_name,"s5k5e2_olq5f20") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"s5k5e2_cma189")) == 0))
+	{
+		pr_err("%s:g_s5k5e2_otp_module_id = %x\n", __func__,g_s5k5e2_otp_module_id);
+		if((strcmp(s_ctrl->sensordata->sensor_name,"s5k5e2_olq5f20") == 0) && (g_s5k5e2_otp_module_id == 0x7))
+		{
+			pr_err("%s:it is ofilm s5k5e2\n", __func__);
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"s5k5e2_cma189") == 0) && (g_s5k5e2_otp_module_id == 0x2))
+		{
+			pr_err("%s:it is trully s5k5e2\n", __func__);
+		}
+		else
+		{
+			pr_err("%s:it is not support s5k5e2 s_ctrl->sensordata->sensor_name =%s\n", __func__,s_ctrl->sensordata->sensor_name);
+			rc = -ENODEV;
+		}
+	}
 	if (rc < 0)
 		pr_err("%s:%d match id failed rc %d\n", __func__, __LINE__, rc);
 	return rc;
@@ -1482,6 +1481,72 @@ static struct msm_camera_i2c_fn_t msm_sensor_qup_func_tbl = {
 	.i2c_write_conf_tbl = msm_camera_qup_i2c_write_conf_tbl,
 };
 
+/* add sensor info for *#87#
+   by wangqin 20130924
+   begin
+*/
+static struct kobject *msm_sensor_device=NULL;
+static char module_info[80] = {0};
+
+void msm_sensor_set_module_info(struct msm_sensor_ctrl_t *s_ctrl)
+{
+
+		printk(" s_ctrl->sensordata->camera_type = %d\n", s_ctrl->sensordata->sensor_info->position);
+
+		switch (s_ctrl->sensordata->sensor_info->position) {
+			case BACK_CAMERA_B:
+				strcat(module_info, "back: ");
+				break;
+			case FRONT_CAMERA_B:
+				strcat(module_info, "front: ");
+				break;
+			default:
+				strcat(module_info, "unknown: ");
+				break;
+			}
+		strcat(module_info, s_ctrl->sensordata->sensor_name);
+		strcat(module_info, "\n");
+}
+
+static ssize_t msm_sensor_module_id_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	ssize_t rc = 0;
+
+	sprintf(buf, "%s\n", module_info);
+	rc = strlen(buf) + 1;
+
+	return rc;
+}
+
+static DEVICE_ATTR(sensor, 0444, msm_sensor_module_id_show, NULL);
+
+int32_t msm_sensor_init_device_name(void)
+{
+	int32_t rc = 0;
+	pr_err("%s %d\n", __func__,__LINE__);
+	if(msm_sensor_device != NULL){
+		pr_err("Macle android_camera already created\n");
+		return 0;
+	}
+	msm_sensor_device = kobject_create_and_add("android_camera", NULL);
+	if (msm_sensor_device == NULL) {
+		printk("%s: subsystem_register failed\n", __func__);
+		rc = -ENOMEM;
+		return rc ;
+	}
+	rc = sysfs_create_file(msm_sensor_device, &dev_attr_sensor.attr);
+	if (rc) {
+		printk("%s: sysfs_create_file failed\n", __func__);
+		kobject_del(msm_sensor_device);
+	}
+
+	return 0 ;
+}
+/* add sensor info for *#87#
+   by wangqin 20130924
+   end
+*/
 int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 				  const void *data)
 {
@@ -1578,18 +1643,12 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 		&msm_sensor_v4l2_subdev_fops;
 
 	CDBG("%s:%d\n", __func__, __LINE__);
-
+	msm_sensor_init_device_name();
+	msm_sensor_set_module_info(s_ctrl);
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
 	CDBG("%s:%d\n", __func__, __LINE__);
 	return rc;
 }
-
-#ifdef CONFIG_MACH_YULONG
-bool msm_sensor_is_probed(int position){
-	CDBG("%s sensor_probed[%d] = %d", __func__, position, sensor_probed[position]);
-	return sensor_probed[position];
-}
-#endif
 
 int msm_sensor_i2c_probe(struct i2c_client *client,
 	const struct i2c_device_id *id, struct msm_sensor_ctrl_t *s_ctrl)
