@@ -2026,6 +2026,7 @@ void reset_all_window_stats(u64 window_start, unsigned int window_size)
 	u64 start_ts = sched_clock();
 	int reason = WINDOW_CHANGE;
 	unsigned int old = 0, new = 0;
+	unsigned int old_window_size = sched_ravg_window;
 
 	disable_window_stats();
 
@@ -2048,8 +2049,13 @@ void reset_all_window_stats(u64 window_start, unsigned int window_size)
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
 
-		if (window_start)
+		if (window_start) {
+			u32 mostly_idle_load = rq->mostly_idle_load;
+
 			rq->window_start = window_start;
+			rq->mostly_idle_load = div64_u64((u64)mostly_idle_load *
+				 (u64)sched_ravg_window, (u64)old_window_size);
+		}
 #ifdef CONFIG_SCHED_FREQ_INPUT
 		rq->curr_runnable_sum = rq->prev_runnable_sum = 0;
 #endif
@@ -8984,6 +8990,9 @@ void __init sched_init(void)
 		rq->window_start = 0;
 		rq->nr_small_tasks = rq->nr_big_tasks = 0;
 		rq->hmp_flags = 0;
+		rq->mostly_idle_load = pct_to_real(20);
+		rq->mostly_idle_nr_run = 3;
+		rq->mostly_idle_freq = 0;
 #ifdef CONFIG_SCHED_FREQ_INPUT
 		rq->old_busy_time = 0;
 		rq->curr_runnable_sum = rq->prev_runnable_sum = 0;
@@ -9683,6 +9692,23 @@ static void cpu_cgroup_css_offline(struct cgroup *cgrp)
 	sched_offline_group(tg);
 }
 
+static int
+cpu_cgroup_allow_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
+{
+	const struct cred *cred = current_cred(), *tcred;
+	struct task_struct *task;
+
+	cgroup_taskset_for_each(task, cgrp, tset) {
+		tcred = __task_cred(task);
+
+		if ((current != task) && !capable(CAP_SYS_NICE) &&
+		    cred->euid != tcred->uid && cred->euid != tcred->suid)
+			return -EACCES;
+	}
+
+	return 0;
+}
+
 static int cpu_cgroup_can_attach(struct cgroup *cgrp,
 				 struct cgroup_taskset *tset)
 {
@@ -10072,7 +10098,7 @@ struct cgroup_subsys cpu_cgroup_subsys = {
 	.css_offline	= cpu_cgroup_css_offline,
 	.can_attach	= cpu_cgroup_can_attach,
 	.attach		= cpu_cgroup_attach,
-	.allow_attach	= subsys_cgroup_allow_attach,
+	.allow_attach	= cpu_cgroup_allow_attach,
 	.exit		= cpu_cgroup_exit,
 	.subsys_id	= cpu_cgroup_subsys_id,
 	.base_cftypes	= cpu_files,
