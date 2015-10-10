@@ -39,13 +39,6 @@ dtb-$(CONFIG_ARCH_MSM8909) += msm8909-sim.dtb \
 	msm8909-1gb-qrd-skua.dtb \
 	msm8909-1gb-cdp.dtb \
 	msm8909-1gb-mtp.dtb
-ifeq ($(CONFIG_MACH_YULONG_MSM8939),y)
-dtb-$(CONFIG_ARCH_MSM8916) += msm8939-cp8675-i01-p0.dtb
-else ifeq ($(CONFIG_MACH_HAIER_MSM8916),y)
-dtb-$(CONFIG_ARCH_MSM8916) += msm8916-g36c1h.dtb
-else ifeq ($(CONFIG_MACH_WINGTECH_MSM8916),y)
-dtb-$(CONFIG_ARCH_MSM8916) += msm8916-t86519a1.dtb
-else
 dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8916-rumi.dtb \
 	msm8916-cdp.dtb \
@@ -63,7 +56,6 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8916-512mb-qrd-skuid.dtb \
 	msm8916-512mb-qrd-skuh.dtb \
 	msm8916-qrd-skut1.dtb \
-	msm8916-t86519a1.dtb \
 	apq8016-mtp.dtb \
 	apq8016-mtp-smb1360.dtb \
 	msm8939-sim.dtb \
@@ -89,7 +81,6 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8929-mtp-jdi-smb1360.dtb \
 	msm8929-mtp-wcd9306-smb1360.dtb \
 	msm8929-cdp-jdi.dtb
-endif
 dtb-$(CONFIG_ARCH_MSM8226) += msm8226-sim.dtb \
 	msm8226-fluid.dtb \
 	msm8226-v1-cdp.dtb \
