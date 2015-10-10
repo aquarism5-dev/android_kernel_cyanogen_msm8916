@@ -37,34 +37,6 @@
 #define MAX_AF_ITERATIONS 3
 #define MAX_NUMBER_OF_STEPS 47
 
-#ifdef CONFIG_MACH_YULONG
-#define SENSOR_ID_OV13850 0xD850
-#define MODULE_TECH_OV13850 (SENSOR_ID_OV13850 << 16 | 0x06)
-#define MODULE_SUNNY_OV13850 (SENSOR_ID_OV13850 << 16 | 0x01)
-#define MODULE_FOXCONN_OV13850 (SENSOR_ID_OV13850 << 16 | 0x11)
-
-#define SENSOR_ID_8865 0x8865
-#define MODULE_SUNNY_8865 (SENSOR_ID_8865 << 16 | 0x01)
-#define MODULE_OFILM_8865 (SENSOR_ID_8865 << 16 | 0x07)
-#define MODULE_FOXCONN_8865 (SENSOR_ID_8865 << 16 | 0x11)
-#define MODULE_TECH_8865 (SENSOR_ID_8865 << 16 | 0x06)
-
-#define SENSOR_ID_OV5648 0x5648
-#define MODULE_SUNNY_OV5648 (SENSOR_ID_OV5648 << 16 | 0x01)
-#define MODULE_OFILM_OV5648 (SENSOR_ID_OV5648 << 16 | 0x07)
-#define MODULE_TECH_OV5648 (SENSOR_ID_OV5648 << 16 | 0x06)
-
-#define SENSOR_ID_OV5693 0x5690
-#define MODULE_TECH_OV5693 (SENSOR_ID_OV5693 << 16 | 0x06)
-
-#define SENSOR_ID_IMX135 0x0135
-#define MODULE_SUNNY_IMX135 (SENSOR_ID_IMX135 << 16 | 0x01)
-#define MODULE_FOXCONN_IMX135 (SENSOR_ID_IMX135 << 16 | 0x02)
-
-
-#define SENSOR_ID_IMX219 0x0219
-#endif
-
 #define MAX_LED_TRIGGERS 3
 
 enum flash_type {
@@ -428,9 +400,6 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
 	CFG_SET_STREAM_TYPE,
-#ifdef CONFIG_MACH_YULONG
-	CFG_UPDATE_OTP,
-#endif
 };
 
 enum msm_actuator_cfg_type_t {
@@ -442,6 +411,9 @@ enum msm_actuator_cfg_type_t {
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
 	CFG_ACTUATOR_INIT,
+// add by gpg
+	CFG_AK7345_ACTUATOR_SET_OTP_TUNE,
+//
 };
 
 enum msm_ois_cfg_type_t {
@@ -562,6 +534,13 @@ struct msm_actuator_set_position_t {
 	uint16_t delay[MAX_NUMBER_OF_STEPS];
 };
 
+// add by gpg
+struct ak7345_actuator_otp_info_t {
+	uint16_t m_inf_code;
+	uint16_t m_macro_code;
+};
+// end by gpg
+
 struct msm_actuator_cfg_data {
 	int cfgtype;
 	uint8_t is_af_supported;
@@ -571,6 +550,9 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+	// add by gpg
+	struct ak7345_actuator_otp_info_t ak7345_otp_info;
+	// end by gpg
 	} cfg;
 };
 
@@ -666,7 +648,6 @@ struct msm_camera_i2c_reg_setting32 {
 	enum msm_camera_i2c_reg_addr_type addr_type;
 	enum msm_camera_i2c_data_type data_type;
 	uint16_t delay;
-	enum msm_camera_qup_i2c_write_batch_t qup_i2c_batch;
 };
 
 struct msm_actuator_tuning_params_t32 {
