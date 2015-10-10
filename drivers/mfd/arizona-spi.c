@@ -1,7 +1,6 @@
 /*
  * arizona-spi.c  --  Arizona SPI bus interface
  *
- * Copyright 2014 Cirrus Logic
  * Copyright 2012 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
@@ -18,6 +17,9 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+#include <linux/of_gpio.h>
+#endif
 
 #include <linux/mfd/arizona/core.h>
 
@@ -28,9 +30,11 @@ static int arizona_spi_probe(struct spi_device *spi)
 	const struct spi_device_id *id = spi_get_device_id(spi);
 	struct arizona *arizona;
 	const struct regmap_config *regmap_config;
-	const struct regmap_config *regmap_32bit_config = NULL;
-	unsigned long type;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+	const struct regmap_config *regmap_32bit_config = NULL;// yht
+#endif
 	int ret;
+	int64_t type;
 
 	if (spi->dev.of_node)
 		type = arizona_of_get_type(&spi->dev);
@@ -49,25 +53,6 @@ static int arizona_spi_probe(struct spi_device *spi)
 		regmap_config = &florida_spi_regmap;
 		break;
 #endif
-#ifdef CONFIG_MFD_CLEARWATER
-	case WM8285:
-	case WM1840:
-		regmap_config = &clearwater_16bit_spi_regmap;
-		regmap_32bit_config = &clearwater_32bit_spi_regmap;
-		break;
-#endif
-#ifdef CONFIG_MFD_LARGO
-	case WM1831:
-	case CS47L24:
-		regmap_config = &largo_spi_regmap;
-		break;
-#endif
-#ifdef CONFIG_MFD_MARLEY
-	case CS47L35:
-		regmap_config = &marley_16bit_spi_regmap;
-		regmap_32bit_config = &marley_32bit_spi_regmap;
-		break;
-#endif
 	default:
 		dev_err(&spi->dev, "Unknown device type %ld\n",
 			id->driver_data);
@@ -84,6 +69,8 @@ static int arizona_spi_probe(struct spi_device *spi)
 		dev_err(&spi->dev, "Failed to allocate register map: %d\n",
 			ret);
 		return ret;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+// yht start
 	}
 
 	if (regmap_32bit_config) {
@@ -96,7 +83,9 @@ static int arizona_spi_probe(struct spi_device *spi)
 				ret);
 			return ret;
 		}
+//end
 	}
+#endif
 
 	arizona->type = id->driver_data;
 	arizona->dev = &spi->dev;
@@ -117,11 +106,6 @@ static const struct spi_device_id arizona_spi_ids[] = {
 	{ "wm8280", WM8280 },
 	{ "wm8281", WM8280 },
 	{ "wm5110", WM5110 },
-	{ "wm8285", WM8285 },
-	{ "wm1840", WM1840 },
-	{ "wm1831", WM1831 },
-	{ "cs47l24", CS47L24 },
-	{ "cs47l35", CS47L35 },
 	{ },
 };
 MODULE_DEVICE_TABLE(spi, arizona_spi_ids);

@@ -1,7 +1,6 @@
 /*
  * Arizona interrupt support
  *
- * Copyright 2014 CirrusLogic, Inc.
  * Copyright 2012 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
@@ -31,16 +30,11 @@ static int arizona_map_irq(struct arizona *arizona, int irq)
 {
 	int ret;
 
-	if (arizona->aod_irq_chip) {
-		ret = regmap_irq_get_virq(arizona->aod_irq_chip, irq);
-		if (ret >= 0)
-			return ret;
-	}
+	ret = regmap_irq_get_virq(arizona->aod_irq_chip, irq);
+	if (ret < 0)
+		ret = regmap_irq_get_virq(arizona->irq_chip, irq);
 
-	if (arizona->irq_chip)
-		return regmap_irq_get_virq(arizona->irq_chip, irq);
-
-	return 0;
+	return ret;
 }
 
 int arizona_request_irq(struct arizona *arizona, int irq, char *name,
@@ -101,9 +95,10 @@ static irqreturn_t arizona_irq_thread(int irq, void *data)
 {
 	struct arizona *arizona = data;
 	bool poll;
-	unsigned int val, nest_irq;
+	unsigned int val;
 	int ret;
 
+//	printk("%s, irq=%d, dev=%s, irq_gpio_state=%d\n", __func__, irq, dev_name(arizona->dev), gpio_get_value_cansleep(arizona->pdata.irq_gpio));
 	ret = pm_runtime_get_sync(arizona->dev);
 	if (ret < 0) {
 		dev_err(arizona->dev, "Failed to resume device: %d\n", ret);
@@ -113,31 +108,27 @@ static irqreturn_t arizona_irq_thread(int irq, void *data)
 	do {
 		poll = false;
 
-		if (arizona->aod_irq_chip)
-			handle_nested_irq(irq_find_mapping(arizona->virq, 0));
+		/* Always handle the AoD domain */
+		handle_nested_irq(irq_find_mapping(arizona->virq, 0));
 
-		if (arizona->irq_chip) {
-			/*
-			 * Check if one of the main interrupts is asserted and
-			 * only check that domain if it is.
-			 */
-			ret = regmap_read(arizona->regmap,
-					  ARIZONA_IRQ_PIN_STATUS,
-					  &val);
-			if (ret == 0 && val & ARIZONA_IRQ1_STS) {
-				nest_irq = irq_find_mapping(arizona->virq, 1);
-				handle_nested_irq(nest_irq);
-			} else if (ret != 0) {
-				dev_err(arizona->dev,
-					"Failed to read main IRQ status: %d\n",
-					ret);
-			}
+		/*
+		 * Check if one of the main interrupts is asserted and only
+		 * check that domain if it is.
+		 */
+		ret = regmap_read(arizona->regmap, ARIZONA_IRQ_PIN_STATUS,
+				  &val);
+		if (ret == 0 && val & ARIZONA_IRQ1_STS) {
+			handle_nested_irq(irq_find_mapping(arizona->virq, 1));
+		} else if (ret != 0) {
+			dev_err(arizona->dev,
+				"Failed to read main IRQ status: %d\n", ret);
 		}
 
 		/*
 		 * Poll the IRQ pin status to see if we're really done
 		 * if the interrupt controller can't do it for us.
 		 */
+		pr_debug("%s, irq_gpio=%d, irq_flags=0x%x\n", __func__, arizona->pdata.irq_gpio, arizona->pdata.irq_flags);
 		if (!arizona->pdata.irq_gpio) {
 			break;
 		} else if (arizona->pdata.irq_flags & IRQF_TRIGGER_RISING &&
@@ -147,6 +138,7 @@ static irqreturn_t arizona_irq_thread(int irq, void *data)
 			   !gpio_get_value_cansleep(arizona->pdata.irq_gpio)) {
 			poll = true;
 		}
+//		printk("%s, poll=%d\n", __func__, poll);
 	} while (poll);
 
 	pm_runtime_mark_last_busy(arizona->dev);
@@ -159,13 +151,6 @@ static void arizona_irq_dummy(struct irq_data *data)
 {
 }
 
-static int arizona_irq_set_wake(struct irq_data *data, unsigned int on)
-{
-	struct arizona *arizona = irq_data_get_irq_chip_data(data);
-
-	return irq_set_irq_wake(arizona->irq, on);
-}
-
 static struct irq_chip arizona_irq_chip = {
 	.name			= "arizona",
 	.irq_disable		= arizona_irq_dummy,
@@ -173,7 +158,6 @@ static struct irq_chip arizona_irq_chip = {
 	.irq_ack		= arizona_irq_dummy,
 	.irq_mask		= arizona_irq_dummy,
 	.irq_unmask		= arizona_irq_dummy,
-	.irq_set_wake		= arizona_irq_set_wake,
 };
 
 static int arizona_irq_map(struct irq_domain *h, unsigned int virq,
@@ -182,7 +166,7 @@ static int arizona_irq_map(struct irq_domain *h, unsigned int virq,
 	struct regmap_irq_chip_data *data = h->host_data;
 
 	irq_set_chip_data(virq, data);
-	irq_set_chip_and_handler(virq, &arizona_irq_chip, handle_simple_irq);
+	irq_set_chip_and_handler(virq, &arizona_irq_chip, handle_edge_irq);
 	irq_set_nested_thread(virq, 1);
 
 	/* ARM needs us to explicitly flag the IRQ as valid
@@ -208,8 +192,8 @@ int arizona_irq_init(struct arizona *arizona)
 	const struct regmap_irq_chip *aod, *irq;
 	bool ctrlif_error = true;
 	struct irq_data *irq_data;
-	unsigned int irq_ctrl_reg = ARIZONA_IRQ_CTRL_1;
 
+	printk("%s, type=%d\n", __func__, arizona->type);
 	switch (arizona->type) {
 #ifdef CONFIG_MFD_WM5102
 	case WM5102:
@@ -236,25 +220,6 @@ int arizona_irq_init(struct arizona *arizona)
 		ctrlif_error = false;
 		break;
 #endif
-#ifdef CONFIG_MFD_CLEARWATER
-	case WM8285:
-	case WM1840:
-		aod = &clearwater_irq;
-		irq = NULL;
-
-		ctrlif_error = false;
-		irq_ctrl_reg = CLEARWATER_IRQ1_CTRL;
-		break;
-#endif
-#ifdef CONFIG_MFD_LARGO
-	case WM1831:
-	case CS47L24:
-		aod = NULL;
-		irq = &largo_irq;
-
-		ctrlif_error = false;
-		break;
-#endif
 #ifdef CONFIG_MFD_WM8997
 	case WM8997:
 		aod = &wm8997_aod;
@@ -263,43 +228,26 @@ int arizona_irq_init(struct arizona *arizona)
 		ctrlif_error = false;
 		break;
 #endif
-#ifdef CONFIG_MFD_VEGAS
+#ifdef CONFIG_MFD_WM8998
 	case WM8998:
 	case WM1814:
-		aod = &vegas_aod;
-		irq = &vegas_irq;
+		aod = &wm8998_aod;
+		irq = &wm8998_irq;
 
 		ctrlif_error = false;
 		break;
 #endif
-#ifdef CONFIG_MFD_MARLEY
-	case CS47L35:
-		aod = &marley_irq;
-		irq = NULL;
-
-		ctrlif_error = false;
-		irq_ctrl_reg = CLEARWATER_IRQ1_CTRL;
-		break;
-#endif
-default:
+	default:
 		BUG_ON("Unknown Arizona class device" == NULL);
 		return -EINVAL;
 	}
 
-	switch (arizona->type) {
-	case WM5102:
-	case WM5110:
-	case WM8997:
-	case WM8998:
-	case WM1814:
-	case WM8280:
-		/* Disable all wake sources by default */
-		regmap_write(arizona->regmap, ARIZONA_WAKE_CONTROL, 0);
-		break;
-	default:
-		break;
-	}
-
+	/* Disable all wake sources by default */
+	ret = regmap_write(arizona->regmap, ARIZONA_WAKE_CONTROL, 0);
+	printk("%s, ARIZONA_WAKE_CONTROL ret=%d\n", __func__, ret);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)
+	arizona->pdata.irq_flags |= IRQF_TRIGGER_RISING;
+#endif
 	/* Read the flags from the interrupt controller if not specified */
 	if (!arizona->pdata.irq_flags) {
 		irq_data = irq_get_irq_data(arizona->irq);
@@ -310,6 +258,7 @@ default:
 		}
 
 		arizona->pdata.irq_flags = irqd_get_trigger_type(irq_data);
+		printk("%s, irq_flags=%d\n", __func__, arizona->pdata.irq_flags);
 		switch (arizona->pdata.irq_flags) {
 		case IRQF_TRIGGER_LOW:
 		case IRQF_TRIGGER_HIGH:
@@ -327,8 +276,9 @@ default:
 
 	if (arizona->pdata.irq_flags & (IRQF_TRIGGER_HIGH |
 					IRQF_TRIGGER_RISING)) {
-		ret = regmap_update_bits(arizona->regmap, irq_ctrl_reg,
+		ret = regmap_update_bits(arizona->regmap, ARIZONA_IRQ_CTRL_1,
 					 ARIZONA_IRQ_POL, 0);
+		printk("%s, irq ctrl ret=%d\n", __func__, ret);
 		if (ret != 0) {
 			dev_err(arizona->dev, "Couldn't set IRQ polarity: %d\n",
 				ret);
@@ -347,27 +297,22 @@ default:
 		goto err;
 	}
 
-	if (aod) {
-		ret = regmap_add_irq_chip(arizona->regmap,
-					irq_create_mapping(arizona->virq, 0),
-					IRQF_ONESHOT, 0, aod,
-					&arizona->aod_irq_chip);
-		if (ret != 0) {
-			dev_err(arizona->dev, "Failed to add AOD IRQs: %d\n",
-				ret);
-			goto err_domain;
-		}
+	ret = regmap_add_irq_chip(arizona->regmap,
+				  irq_create_mapping(arizona->virq, 0),
+				  IRQF_ONESHOT, -1, aod,
+				  &arizona->aod_irq_chip);
+	if (ret != 0) {
+		dev_err(arizona->dev, "Failed to add AOD IRQs: %d\n", ret);
+		goto err_domain;
 	}
 
-	if (irq) {
-		ret = regmap_add_irq_chip(arizona->regmap,
-					  irq_create_mapping(arizona->virq, 1),
-					  IRQF_ONESHOT, 0, irq,
-					  &arizona->irq_chip);
-		if (ret != 0) {
-			dev_err(arizona->dev, "Failed to add main IRQs: %d\n", ret);
-			goto err_aod;
-		}
+	ret = regmap_add_irq_chip(arizona->regmap,
+				  irq_create_mapping(arizona->virq, 1),
+				  IRQF_ONESHOT, -1, irq,
+				  &arizona->irq_chip);
+	if (ret != 0) {
+		dev_err(arizona->dev, "Failed to add main IRQs: %d\n", ret);
+		goto err_aod;
 	}
 
 	/* Make sure the boot done IRQ is unmasked for resumes */
@@ -395,12 +340,14 @@ default:
 	}
 
 	/* Used to emulate edge trigger and to work around broken pinmux */
+	printk("%s, irq_gpio=%d\n", __func__, arizona->pdata.irq_gpio);
 	if (arizona->pdata.irq_gpio) {
 		if (gpio_to_irq(arizona->pdata.irq_gpio) != arizona->irq) {
 			dev_warn(arizona->dev, "IRQ %d is not GPIO %d (%d)\n",
 				 arizona->irq, arizona->pdata.irq_gpio,
 				 gpio_to_irq(arizona->pdata.irq_gpio));
 			arizona->irq = gpio_to_irq(arizona->pdata.irq_gpio);
+			printk("%s, irq=%d\n", __func__, arizona->irq);
 		}
 
 		ret = devm_gpio_request_one(arizona->dev,
@@ -413,7 +360,12 @@ default:
 			arizona->pdata.irq_gpio = 0;
 		}
 	}
-
+	printk("%s, irq_gpio=%d, irq=%d\n", __func__, arizona->pdata.irq_gpio, arizona->irq);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)
+//the irq thread is needed
+#else
+	if (0)
+#endif
 	ret = request_threaded_irq(arizona->irq, NULL, arizona_irq_thread,
 				   flags, "arizona", arizona);
 
@@ -422,7 +374,9 @@ default:
 			arizona->irq, ret);
 		goto err_main_irq;
 	}
+	enable_irq_wake(arizona->irq);
 
+	printk("%s, done\n", __func__);
 	return 0;
 
 err_main_irq:
@@ -437,6 +391,7 @@ err_aod:
 			    arizona->aod_irq_chip);
 err_domain:
 err:
+	printk("%s error, ret=%d\n", __func__, ret);
 	return ret;
 }
 
