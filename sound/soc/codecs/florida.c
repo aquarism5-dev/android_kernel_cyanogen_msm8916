@@ -38,6 +38,25 @@
 #define FLORIDA_DEFAULT_FRAGMENTS       1
 #define FLORIDA_DEFAULT_FRAGMENT_SIZE   4096
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+#include<uapi/linux/input.h>
+#include "wcd-mbhc-v2.h"
+#define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
+			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
+			   SND_JACK_UNSUPPORTED) //==455==1C7
+#define WCD_MBHC_JACK_BUTTON_MASK (SND_JACK_BTN_0 | SND_JACK_BTN_1 | \
+				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
+				  SND_JACK_BTN_4) //==130023424==7C00000
+
+struct snd_soc_jack headset_jack  = {
+	.status = 0,
+};
+struct snd_soc_jack button_jack = {
+	.status = 0,
+};
+#endif
+
+
 struct florida_compr {
 	struct mutex lock;
 
@@ -45,8 +64,11 @@ struct florida_compr {
 	struct wm_adsp *adsp;
 
 	size_t total_copied;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	bool allocated;
+#endif
 	bool trig;
+	bool forced;
 };
 
 struct florida_priv {
@@ -214,37 +236,42 @@ static int florida_sysclk_ev(struct snd_soc_dapm_widget *w,
 	default:
 		break;
 	}
-
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	udelay(1000);
+#endif
 
 	return 0;
 }
 
-static int florida_adsp_power_ev(struct snd_soc_dapm_widget *w,
-				 struct snd_kcontrol *kcontrol,
-				 int event)
+static int florida_virt_dsp_power_ev(struct snd_soc_dapm_widget *w,
+				    struct snd_kcontrol *kcontrol, int event)
 {
 	struct florida_priv *florida = snd_soc_codec_get_drvdata(w->codec);
 
+	mutex_lock(&florida->compr_info.lock);
+
+	if (!florida->compr_info.stream)
+		florida->compr_info.trig = false;
+
 	switch (event) {
-	case SND_SOC_DAPM_PRE_PMU:
-		if (w->shift == 2) {
-			mutex_lock(&florida->compr_info.lock);
-			florida->compr_info.trig = false;
-			mutex_unlock(&florida->compr_info.lock);
-		}
+	case SND_SOC_DAPM_POST_PMU:
+		florida->compr_info.forced = true;
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		florida->compr_info.forced = false;
 		break;
 	default:
 		break;
 	}
 
-	return arizona_adsp_power_ev(w, kcontrol, event);
+	mutex_unlock(&florida->compr_info.lock);
+
+	return 0;
 }
 
 static DECLARE_TLV_DB_SCALE(ana_tlv, 0, 100, 0);
 static DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
 static DECLARE_TLV_DB_SCALE(digital_tlv, -6400, 50, 0);
-static DECLARE_TLV_DB_SCALE(vol_limit_tlv, -600, 50, 116);
 static DECLARE_TLV_DB_SCALE(noise_tlv, 0, 600, 0);
 static DECLARE_TLV_DB_SCALE(ng_tlv, -10200, 600, 0);
 
@@ -361,7 +388,13 @@ ARIZONA_MIXER_CONTROLS("EQ2", ARIZONA_EQ2MIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("EQ3", ARIZONA_EQ3MIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("EQ4", ARIZONA_EQ4MIX_INPUT_1_SOURCE),
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 ARIZONA_EQ_CONTROL("EQ1 Coefficients", ARIZONA_EQ1_2),
+#else
+SND_SOC_BYTES("EQ1 Coefficients", ARIZONA_EQ1_3, 19),
+SOC_SINGLE("EQ1 Mode Switch", ARIZONA_EQ1_2, ARIZONA_EQ1_B1_MODE_SHIFT, 1, 0),
+#endif
+
 SOC_SINGLE_TLV("EQ1 B1 Volume", ARIZONA_EQ1_1, ARIZONA_EQ1_B1_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 SOC_SINGLE_TLV("EQ1 B2 Volume", ARIZONA_EQ1_1, ARIZONA_EQ1_B2_GAIN_SHIFT,
@@ -373,7 +406,13 @@ SOC_SINGLE_TLV("EQ1 B4 Volume", ARIZONA_EQ1_2, ARIZONA_EQ1_B4_GAIN_SHIFT,
 SOC_SINGLE_TLV("EQ1 B5 Volume", ARIZONA_EQ1_2, ARIZONA_EQ1_B5_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 ARIZONA_EQ_CONTROL("EQ2 Coefficients", ARIZONA_EQ2_2),
+#else
+SND_SOC_BYTES("EQ2 Coefficients", ARIZONA_EQ2_3, 19),
+SOC_SINGLE("EQ2 Mode Switch", ARIZONA_EQ2_2, ARIZONA_EQ2_B1_MODE_SHIFT, 1, 0),
+#endif
+
 SOC_SINGLE_TLV("EQ2 B1 Volume", ARIZONA_EQ2_1, ARIZONA_EQ2_B1_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 SOC_SINGLE_TLV("EQ2 B2 Volume", ARIZONA_EQ2_1, ARIZONA_EQ2_B2_GAIN_SHIFT,
@@ -385,7 +424,13 @@ SOC_SINGLE_TLV("EQ2 B4 Volume", ARIZONA_EQ2_2, ARIZONA_EQ2_B4_GAIN_SHIFT,
 SOC_SINGLE_TLV("EQ2 B5 Volume", ARIZONA_EQ2_2, ARIZONA_EQ2_B5_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 ARIZONA_EQ_CONTROL("EQ3 Coefficients", ARIZONA_EQ3_2),
+#else
+SND_SOC_BYTES("EQ3 Coefficients", ARIZONA_EQ3_3, 19),
+SOC_SINGLE("EQ3 Mode Switch", ARIZONA_EQ3_2, ARIZONA_EQ3_B1_MODE_SHIFT, 1, 0),
+#endif
+
 SOC_SINGLE_TLV("EQ3 B1 Volume", ARIZONA_EQ3_1, ARIZONA_EQ3_B1_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 SOC_SINGLE_TLV("EQ3 B2 Volume", ARIZONA_EQ3_1, ARIZONA_EQ3_B2_GAIN_SHIFT,
@@ -397,7 +442,13 @@ SOC_SINGLE_TLV("EQ3 B4 Volume", ARIZONA_EQ3_2, ARIZONA_EQ3_B4_GAIN_SHIFT,
 SOC_SINGLE_TLV("EQ3 B5 Volume", ARIZONA_EQ3_2, ARIZONA_EQ3_B5_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 ARIZONA_EQ_CONTROL("EQ4 Coefficients", ARIZONA_EQ4_2),
+#else
+SND_SOC_BYTES("EQ4 Coefficients", ARIZONA_EQ4_3, 19),
+SOC_SINGLE("EQ4 Mode Switch", ARIZONA_EQ4_2, ARIZONA_EQ4_B1_MODE_SHIFT, 1, 0),
+#endif
+
 SOC_SINGLE_TLV("EQ4 B1 Volume", ARIZONA_EQ4_1, ARIZONA_EQ4_B1_GAIN_SHIFT,
 	       24, 0, eq_tlv),
 SOC_SINGLE_TLV("EQ4 B2 Volume", ARIZONA_EQ4_1, ARIZONA_EQ4_B2_GAIN_SHIFT,
@@ -436,8 +487,9 @@ SOC_ENUM("LHPF4 Mode", arizona_lhpf4_mode),
 
 ARIZONA_SAMPLE_RATE_CONTROL("Sample Rate 2", 2),
 ARIZONA_SAMPLE_RATE_CONTROL("Sample Rate 3", 3),
-
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 SOC_VALUE_ENUM("FX Rate", arizona_fx_rate),
+#endif
 
 SOC_VALUE_ENUM("ISRC1 FSL", arizona_isrc_fsl[0]),
 SOC_VALUE_ENUM("ISRC2 FSL", arizona_isrc_fsl[1]),
@@ -446,7 +498,6 @@ SOC_VALUE_ENUM("ISRC1 FSH", arizona_isrc_fsh[0]),
 SOC_VALUE_ENUM("ISRC2 FSH", arizona_isrc_fsh[1]),
 SOC_VALUE_ENUM("ISRC3 FSH", arizona_isrc_fsh[2]),
 SOC_VALUE_ENUM("ASRC RATE 1", arizona_asrc_rate1),
-SOC_VALUE_ENUM("ASRC RATE 2", arizona_asrc_rate2),
 
 ARIZONA_MIXER_CONTROLS("DSP1L", ARIZONA_DSP1LMIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("DSP1R", ARIZONA_DSP1RMIX_INPUT_1_SOURCE),
@@ -520,39 +571,17 @@ SOC_DOUBLE_R_TLV("SPKDAT2 Digital Volume", ARIZONA_DAC_DIGITAL_VOLUME_6L,
 		 ARIZONA_DAC_DIGITAL_VOLUME_6R, ARIZONA_OUT6L_VOL_SHIFT,
 		 0xbf, 0, digital_tlv),
 
-SOC_DOUBLE_R_RANGE_TLV("HPOUT1 Volume Limit", ARIZONA_DAC_VOLUME_LIMIT_1L,
-		 ARIZONA_DAC_VOLUME_LIMIT_1R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-SOC_DOUBLE_R_RANGE_TLV("HPOUT2 Volume Limit", ARIZONA_DAC_VOLUME_LIMIT_2L,
-		 ARIZONA_DAC_VOLUME_LIMIT_2R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-SOC_DOUBLE_R_RANGE_TLV("HPOUT3 Volume Limit", ARIZONA_DAC_VOLUME_LIMIT_3L,
-		 ARIZONA_DAC_VOLUME_LIMIT_3R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-SOC_DOUBLE_R_RANGE_TLV("Speaker Volume Limit", ARIZONA_OUT_VOLUME_4L,
-		 ARIZONA_OUT_VOLUME_4R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-SOC_DOUBLE_R_RANGE_TLV("SPKDAT1 Volume Limit", ARIZONA_DAC_VOLUME_LIMIT_5L,
-		 ARIZONA_DAC_VOLUME_LIMIT_5R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-SOC_DOUBLE_R_RANGE_TLV("SPKDAT2 Volume Limit", ARIZONA_DAC_VOLUME_LIMIT_6L,
-		 ARIZONA_DAC_VOLUME_LIMIT_6R, ARIZONA_OUT1L_VOL_LIM_SHIFT,
-		 0x74, 0x8C, 0, vol_limit_tlv),
-
 SOC_DOUBLE("SPKDAT1 Switch", ARIZONA_PDM_SPK1_CTRL_1, ARIZONA_SPK1L_MUTE_SHIFT,
 	   ARIZONA_SPK1R_MUTE_SHIFT, 1, 1),
 SOC_DOUBLE("SPKDAT2 Switch", ARIZONA_PDM_SPK2_CTRL_1, ARIZONA_SPK2L_MUTE_SHIFT,
 	   ARIZONA_SPK2R_MUTE_SHIFT, 1, 1),
 
-SOC_DOUBLE_EXT("HPOUT1 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE1L_ENA_SHIFT, ARIZONA_DRE1R_ENA_SHIFT, 1, 0,
-	   snd_soc_get_volsw, florida_put_dre),
-SOC_DOUBLE_EXT("HPOUT2 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE2L_ENA_SHIFT, ARIZONA_DRE2R_ENA_SHIFT, 1, 0,
-	   snd_soc_get_volsw, florida_put_dre),
-SOC_DOUBLE_EXT("HPOUT3 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE3L_ENA_SHIFT, ARIZONA_DRE3R_ENA_SHIFT, 1, 0,
-	   snd_soc_get_volsw, florida_put_dre),
+SOC_DOUBLE("HPOUT1 DRE Switch", ARIZONA_DRE_ENABLE,
+	   ARIZONA_DRE1L_ENA_SHIFT, ARIZONA_DRE1R_ENA_SHIFT, 1, 0),
+SOC_DOUBLE("HPOUT2 DRE Switch", ARIZONA_DRE_ENABLE,
+	   ARIZONA_DRE2L_ENA_SHIFT, ARIZONA_DRE2R_ENA_SHIFT, 1, 0),
+SOC_DOUBLE("HPOUT3 DRE Switch", ARIZONA_DRE_ENABLE,
+	   ARIZONA_DRE3L_ENA_SHIFT, ARIZONA_DRE3R_ENA_SHIFT, 1, 0),
 
 SOC_ENUM("Output Ramp Up", arizona_out_vi_ramp),
 SOC_ENUM("Output Ramp Down", arizona_out_vd_ramp),
@@ -564,7 +593,9 @@ SOC_SINGLE_TLV("Noise Gate Threshold Volume", ARIZONA_NOISE_GATE_CONTROL,
 SOC_ENUM("Noise Gate Hold", arizona_ng_hold),
 
 SOC_VALUE_ENUM("Output Rate 1", arizona_output_rate),
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 SOC_VALUE_ENUM("In Rate", arizona_input_rate),
+#endif
 
 FLORIDA_NG_SRC("HPOUT1L", ARIZONA_NOISE_GATE_SELECT_1L),
 FLORIDA_NG_SRC("HPOUT1R", ARIZONA_NOISE_GATE_SELECT_1R),
@@ -912,10 +943,18 @@ SND_SOC_DAPM_PGA("ASRC2L", ARIZONA_ASRC_ENABLE, ARIZONA_ASRC2L_ENA_SHIFT, 0,
 SND_SOC_DAPM_PGA("ASRC2R", ARIZONA_ASRC_ENABLE, ARIZONA_ASRC2R_ENA_SHIFT, 0,
 		 NULL, 0),
 
-WM_ADSP2("DSP1", 0, florida_adsp_power_ev),
-WM_ADSP2("DSP2", 1, florida_adsp_power_ev),
-WM_ADSP2("DSP3", 2, florida_adsp_power_ev),
-WM_ADSP2("DSP4", 3, florida_adsp_power_ev),
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+WM_ADSP2("DSP1", 0, arizona_adsp_power_ev),
+WM_ADSP2("DSP2", 1, arizona_adsp_power_ev),
+WM_ADSP2("DSP3", 2, arizona_adsp_power_ev),
+WM_ADSP2("DSP4", 3, arizona_adsp_power_ev),
+#else
+WM_ADSP2("DSP1", 0),
+WM_ADSP2("DSP2", 1),
+WM_ADSP2("DSP3", 2),
+WM_ADSP2("DSP4", 3),
+#endif
+
 
 SND_SOC_DAPM_PGA("ISRC1INT1", ARIZONA_ISRC_1_CTRL_3,
 		 ARIZONA_ISRC1_INT0_ENA_SHIFT, 0, NULL, 0),
@@ -1240,8 +1279,9 @@ SND_SOC_DAPM_VIRT_MUX("DSP2 Virtual Input", SND_SOC_NOPM, 0, 0,
 SND_SOC_DAPM_VIRT_MUX("DSP3 Virtual Input", SND_SOC_NOPM, 0, 0,
 		      &florida_memory_mux[1]),
 
-SND_SOC_DAPM_VIRT_MUX("DSP Virtual Output Mux", SND_SOC_NOPM, 0, 0,
-		      &florida_dsp_output_mux[0]),
+SND_SOC_DAPM_VIRT_MUX_E("DSP Virtual Output Mux", SND_SOC_NOPM, 0, 0,
+		      &florida_dsp_output_mux[0], florida_virt_dsp_power_ev,
+		      SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 
 ARIZONA_MUX_WIDGETS(ISRC1DEC1, "ISRC1DEC1"),
 ARIZONA_MUX_WIDGETS(ISRC1DEC2, "ISRC1DEC2"),
@@ -1396,6 +1436,22 @@ SND_SOC_DAPM_OUTPUT("MICSUPP"),
 	{ name, "DSP4.6", "DSP4" }
 
 static const struct snd_soc_dapm_route florida_dapm_routes[] = {
+	//{ "AIF2 Capture", NULL, "DBVDD2" },
+	//{ "AIF2 Playback", NULL, "DBVDD2" },
+
+	//{ "AIF3 Capture", NULL, "DBVDD3" },
+	//{ "AIF3 Playback", NULL, "DBVDD3" },
+
+	//{ "OUT1L", NULL, "CPVDD" },
+	//{ "OUT1R", NULL, "CPVDD" },
+	//{ "OUT2L", NULL, "CPVDD" },
+	//{ "OUT2R", NULL, "CPVDD" },
+	//{ "OUT3L", NULL, "CPVDD" },
+	//{ "OUT3R", NULL, "CPVDD" },
+
+	//{ "OUT4L", NULL, "SPKVDDL" },
+	//{ "OUT4R", NULL, "SPKVDDR" },
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	{ "AIF2 Capture", NULL, "DBVDD2" },
 	{ "AIF2 Playback", NULL, "DBVDD2" },
 
@@ -1411,6 +1467,7 @@ static const struct snd_soc_dapm_route florida_dapm_routes[] = {
 
 	{ "OUT4L", NULL, "SPKVDDL" },
 	{ "OUT4R", NULL, "SPKVDDR" },
+#endif
 
 	{ "OUT1L", NULL, "SYSCLK" },
 	{ "OUT1R", NULL, "SYSCLK" },
@@ -1901,6 +1958,46 @@ static struct snd_soc_dai_driver florida_dai[] = {
 	},
 };
 
+/* Fix the issue that FM and speaker would no sound when kernel suspended, yht add it according to xuke*/
+int msm_audrx_init_florida(struct snd_soc_pcm_runtime *rtd)
+{
+
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+	int ret = 0;
+
+	printk("%s\n", __func__);
+	pr_debug("At %d In (%s)\n",__LINE__, __FUNCTION__);
+
+	snd_soc_dapm_ignore_suspend(dapm, "HPOUT1L");
+	snd_soc_dapm_ignore_suspend(dapm, "HPOUT1R");
+	snd_soc_dapm_ignore_suspend(dapm, "AIF1 Playback");
+	
+	snd_soc_dapm_ignore_suspend(dapm, "SPKOUTLN");
+	snd_soc_dapm_ignore_suspend(dapm, "SPKOUTLP");
+	snd_soc_dapm_ignore_suspend(dapm, "SPKOUTRN");
+	snd_soc_dapm_ignore_suspend(dapm, "SPKOUTRP");
+
+	snd_soc_dapm_ignore_suspend(dapm, "HPOUT3L");
+	snd_soc_dapm_ignore_suspend(dapm, "HPOUT3R");
+	
+	//snd_soc_dapm_ignore_suspend(dapm, "RXANCL");
+	//snd_soc_dapm_ignore_suspend(dapm, "RXANCR");
+
+	snd_soc_dapm_ignore_suspend(dapm, "IN1L");
+	snd_soc_dapm_ignore_suspend(dapm, "IN1R");
+	snd_soc_dapm_ignore_suspend(dapm, "IN2L");
+	snd_soc_dapm_ignore_suspend(dapm, "IN2R");
+	snd_soc_dapm_ignore_suspend(dapm, "IN3L");
+	snd_soc_dapm_ignore_suspend(dapm, "IN3R");
+	snd_soc_dapm_ignore_suspend(dapm, "IN4L");
+	snd_soc_dapm_ignore_suspend(dapm, "IN4R");
+	snd_soc_dapm_sync(dapm);
+
+	return ret;
+}
+EXPORT_SYMBOL(msm_audrx_init_florida);
+
 static irqreturn_t adsp2_irq(int irq, void *data)
 {
 	struct florida_priv *florida = data;
@@ -1909,14 +2006,22 @@ static irqreturn_t adsp2_irq(int irq, void *data)
 	mutex_lock(&florida->compr_info.lock);
 
 	if (!florida->compr_info.trig &&
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	    florida->core.adsp[2].fw_features.ez2control_trigger &&
+#else
+	    florida->core.adsp[2].fw_id == 0x4000d &&
+#endif
 	    florida->core.adsp[2].running) {
 		if (florida->core.arizona->pdata.ez2ctrl_trigger)
 			florida->core.arizona->pdata.ez2ctrl_trigger();
 		florida->compr_info.trig = true;
 	}
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	if (!florida->compr_info.allocated)
+#else
+	if (!florida->compr_info.stream)
+#endif
 		goto out;
 
 	ret = wm_adsp_stream_handle_irq(florida->compr_info.adsp);
@@ -1987,9 +2092,13 @@ static int florida_free(struct snd_compr_stream *stream)
 
 	mutex_lock(&florida->compr_info.lock);
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	florida->compr_info.allocated = false;
+#endif
 	florida->compr_info.stream = NULL;
 	florida->compr_info.total_copied = 0;
+	if (!florida->compr_info.forced)
+		florida->compr_info.trig = false;
 
 	wm_adsp_stream_free(florida->compr_info.adsp);
 
@@ -2020,8 +2129,10 @@ static int florida_set_params(struct snd_compr_stream *stream,
 	}
 
 	ret = wm_adsp_stream_alloc(compr->adsp, params);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	if (ret == 0)
 		compr->allocated = true;
+#endif
 
 out:
 	mutex_unlock(&compr->lock);
@@ -2146,7 +2257,11 @@ static int florida_codec_probe(struct snd_soc_codec *codec)
 		return ret;
 
 	arizona_init_spk(codec);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+//none
+#else
 	arizona_init_gpio(codec);
+#endif
 	arizona_init_mono(codec);
 	arizona_init_input(codec);
 
@@ -2186,9 +2301,63 @@ static int florida_codec_probe(struct snd_soc_codec *codec)
 			ret);
 		return ret;
 	}
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+
+	printk("lct-codec At %d In (%s),codec name = %s,codec id = %d\n",__LINE__, __FUNCTION__,codec->name,codec->id);
+	printk("lct-codec At %d In (%s)\n",__LINE__, __FUNCTION__);
+	if (headset_jack.jack == NULL) {
+		pr_debug("At %d In (%s)\n",__LINE__, __FUNCTION__);
+		
+		ret = snd_soc_jack_new(codec, "Headset Jack",
+				WCD_MBHC_JACK_MASK, &headset_jack);
+		if (ret) {
+			pr_err("%s: Failed to create new jack\n", __func__);
+			return ret;
+		}
+		printk("lct-codec At %d In (%s)\n",__LINE__, __FUNCTION__);
+
+		ret = snd_soc_jack_new(codec, "Button Jack",
+				       WCD_MBHC_JACK_BUTTON_MASK,
+				       &button_jack);
+		if (ret) {
+			pr_err("Failed to create new jack\n");
+			return ret;
+		}
+		printk("lct-codec At %d In (%s)\n",__LINE__, __FUNCTION__);
+
+		ret = snd_jack_set_key(button_jack.jack,
+				       SND_JACK_BTN_0,
+				       KEY_MEDIA);
+		if (ret) {
+			pr_err("%s: Failed to set code for btn-0\n",
+				__func__);
+			return ret;
+		}
+		printk("lct-codec At %d In (%s)\n",__LINE__, __FUNCTION__);
+
+		//INIT_DELAYED_WORK(&mbhc->mbhc_firmware_dwork,
+		//		  wcd_mbhc_fw_read);
+		//INIT_DELAYED_WORK(&mbhc->mbhc_btn_dwork, wcd_btn_lpress_fn);
+	}
+#endif
 
 	return 0;
 }
+
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) 
+//void snd_jack_report_florida(struct snd_soc_jack *jack, int status,
+//				 int mask)
+void snd_jack_report_florida(int status, int mask)
+{
+	printk("lct-codec At %d In (%s),status=%d\n",__LINE__, __FUNCTION__,status);
+	headset_jack.status &= ~mask;
+	headset_jack.status |= status & mask;
+	
+	snd_jack_report(headset_jack.jack, headset_jack.status);
+}
+EXPORT_SYMBOL(snd_jack_report_florida);
+#endif
+
 
 static int florida_codec_remove(struct snd_soc_codec *codec)
 {

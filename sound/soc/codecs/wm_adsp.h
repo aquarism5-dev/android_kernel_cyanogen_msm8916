@@ -29,9 +29,12 @@ struct wm_adsp_region {
 
 struct wm_adsp_alg_region {
 	struct list_head list;
+	unsigned int block;
 	unsigned int alg;
 	int type;
 	unsigned int base;
+	unsigned int offset;
+	size_t len;
 };
 
 struct wm_adsp_buffer_region {
@@ -63,17 +66,20 @@ struct wm_adsp_fw_defs {
 	struct wm_adsp_fw_caps *caps;
 };
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 struct wm_adsp_fw_features {
 	bool shutdown:1;
 	bool ez2control_trigger:1;
 };
+#endif
 
 struct wm_adsp {
 	const char *part;
-	char part_rev;
 	int num;
 	int type;
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	int rev;
+#endif
 	struct device *dev;
 	struct regmap *regmap;
 	struct snd_soc_card *card;
@@ -82,11 +88,10 @@ struct wm_adsp {
 	int sysclk_reg;
 	int sysclk_mask;
 	int sysclk_shift;
-
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	unsigned int rate_cache;
 	struct mutex rate_lock;
-	int (*rate_put_cb) (struct wm_adsp *adsp, unsigned int mask,
-			    unsigned int val);
+#endif
 
 	struct list_head alg_regions;
 
@@ -96,8 +101,8 @@ struct wm_adsp {
 	int num_mems;
 
 	int fw;
-	int fw_ver;
 	bool running;
+	int fw_ver;
 
 	struct mutex ctl_lock;
 	struct list_head ctl_list;
@@ -116,8 +121,9 @@ struct wm_adsp {
 	int num_firmwares;
 	struct wm_adsp_fw_defs *firmwares;
 
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 	struct wm_adsp_fw_features fw_features;
-
+#endif
 	struct mutex *fw_lock;
 	struct work_struct boot_work;
 };
@@ -127,6 +133,22 @@ struct wm_adsp {
 	.shift = num, .event = wm_adsp1_event, \
 	.event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_PRE_PMD }
 
+#define WM_ADSP2_E(wname, num, event_fn) \
+{	.id = snd_soc_dapm_dai_link, .name = wname " Preloader", \
+	.reg = SND_SOC_NOPM, .shift = num, .event = event_fn, \
+	.event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD }, \
+{	.id = snd_soc_dapm_out_drv, .name = wname, \
+	.reg = SND_SOC_NOPM, .shift = num, .event = wm_adsp2_event, \
+	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD }
+
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+//none
+#else
+#define WM_ADSP2(wname, num) \
+	WM_ADSP2_E(wname, num, wm_adsp2_early_event)
+#endif
+
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 #define WM_ADSP2(wname, num, event_fn) \
 {	.id = snd_soc_dapm_dai_link, .name = wname " Preloader", \
 	.reg = SND_SOC_NOPM, .shift = num, .event = event_fn, \
@@ -135,28 +157,28 @@ struct wm_adsp {
 	.reg = SND_SOC_NOPM, .shift = num, .event = wm_adsp2_event, \
 	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD }
 
+extern const struct snd_kcontrol_new wm_adsp2v2_fw_controls[];//yht 
+#endif
+
 extern const struct snd_kcontrol_new wm_adsp1_fw_controls[];
 extern const struct snd_kcontrol_new wm_adsp2_fw_controls[];
-extern const struct snd_kcontrol_new wm_adsp2v2_fw_controls[];
 
-int wm_adsp1_init(struct wm_adsp *dsp);
-int wm_adsp2_init(struct wm_adsp *dsp, struct mutex *fw_lock);
+int wm_adsp1_init(struct wm_adsp *adsp);
+int wm_adsp2_init(struct wm_adsp *adsp, struct mutex *fw_lock);
 int wm_adsp1_event(struct snd_soc_dapm_widget *w,
 		   struct snd_kcontrol *kcontrol, int event);
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
+//none
+#else
+int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
+			 struct snd_kcontrol *kcontrol, int event);
+#endif
 
-#if defined(CONFIG_SND_SOC_WM_ADSP)
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)
 int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
 			 struct snd_kcontrol *kcontrol, int event,
 			 unsigned int freq);
-#else
-static inline int wm_adsp2_early_event(struct snd_soc_dapm_widget *w,
-				       struct snd_kcontrol *kcontrol, int event,
-				       unsigned int freq)
-{
-	return 0;
-}
 #endif
-
 int wm_adsp2_event(struct snd_soc_dapm_widget *w,
 		   struct snd_kcontrol *kcontrol, int event);
 

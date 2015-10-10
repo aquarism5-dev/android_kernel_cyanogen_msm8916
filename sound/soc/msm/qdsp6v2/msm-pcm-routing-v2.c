@@ -732,15 +732,17 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 			acdb_dev_id = fe_dai_app_type_cfg[fedai_id].acdb_dev_id;
 			topology = msm_routing_get_adm_topology(path_type,
 								fedai_id);
+			if (msm_bedais[i].port_id == VOICE_RECORD_RX ||
+			    msm_bedais[i].port_id == VOICE_RECORD_TX)
+				topology = NULL_COPP_TOPOLOGY;
 			copp_idx = adm_open(msm_bedais[i].port_id, path_type,
 					    sample_rate, channels, topology,
 					    perf_mode, bits_per_sample,
 					    app_type, acdb_dev_id);
-			if ((copp_idx < 0) ||
+			if ((copp_idx < 0) &&
 				(copp_idx >= MAX_COPPS_PER_PORT)) {
 				pr_err("%s: adm open failed copp_idx:%d\n",
 					__func__, copp_idx);
-				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
@@ -837,7 +839,7 @@ void msm_pcm_routing_dereg_phy_stream(int fedai_id, int stream_type)
 								__func__);
 				continue;
 			}
-			topology = adm_get_topology_for_port_copp_idx(
+			topology = adm_get_topology_for_port_from_copp_id(
 					msm_bedais[i].port_id, idx);
 			adm_close(msm_bedais[i].port_id, fdai->perf_mode, idx);
 			pr_debug("%s:copp:%ld,idx bit fe:%d,type:%d,be:%d\n",
@@ -944,6 +946,9 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 
 			topology = msm_routing_get_adm_topology(path_type, val);
 			acdb_dev_id = fe_dai_app_type_cfg[val].acdb_dev_id;
+			if (msm_bedais[reg].port_id == VOICE_RECORD_RX ||
+			    msm_bedais[reg].port_id == VOICE_RECORD_TX)
+				topology = NULL_COPP_TOPOLOGY;
 			copp_idx = adm_open(msm_bedais[reg].port_id, path_type,
 					    sample_rate, channels, topology,
 					    fdai->perf_mode, bits_per_sample,
@@ -985,21 +990,16 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 		if (msm_bedais[reg].active && fdai->strm_id !=
 			INVALID_SESSION) {
 			int idx;
-			int port_id;
 			unsigned long copp =
 				session_copp_map[val][session_type][reg];
 			for (idx = 0; idx < MAX_COPPS_PER_PORT; idx++)
 				if (test_bit(idx, &copp))
 					break;
-
-			port_id = msm_bedais[reg].port_id;
-			topology = adm_get_topology_for_port_copp_idx(port_id,
-								      idx);
+			topology = msm_routing_get_adm_topology(path_type, val);
 			adm_close(msm_bedais[reg].port_id, fdai->perf_mode,
 				  idx);
-			pr_debug("%s: copp: %ld, reset idx bit fe:%d, type: %d, be:%d topology=0x%x\n",
-				 __func__, copp, val, session_type, reg,
-				 topology);
+			pr_debug("%s: copp: %ld, reset idx bit fe:%d, type: %d, be:%d\n",
+				 __func__, copp, val, session_type, reg);
 			clear_bit(idx,
 				  &session_copp_map[val][session_type][reg]);
 			if ((DOLBY_ADM_COPP_TOPOLOGY_ID == topology ||
@@ -2631,6 +2631,11 @@ static const struct snd_kcontrol_new mmul5_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150416	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new mmul6_mixer_controls[] = {
@@ -2640,6 +2645,11 @@ static const struct snd_kcontrol_new mmul6_mixer_controls[] = {
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_SLIMBUS_0_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA6, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150416	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA6, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+#endif
 	SOC_SINGLE_EXT("TERT_MI2S_TX", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA6, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
@@ -3096,6 +3106,11 @@ static const struct snd_kcontrol_new tx_voice_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_Voice", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_CS_VOICE, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH) //yht,0323
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_Voice", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_CS_VOICE, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new tx_voice2_mixer_controls[] = {
@@ -3126,6 +3141,11 @@ static const struct snd_kcontrol_new tx_voice2_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_Voice2", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_VOICE2, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150411	Fix mic for SIM2.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_Voice2", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_VOICE2, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new tx_volte_mixer_controls[] = {
@@ -3156,6 +3176,11 @@ static const struct snd_kcontrol_new tx_volte_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_VoLTE", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_VOLTE, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_VoLTE", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_VOLTE, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new tx_vowlan_mixer_controls[] = {
@@ -3186,6 +3211,11 @@ static const struct snd_kcontrol_new tx_vowlan_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_VoWLAN", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_VOWLAN, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_VoWLAN", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_VOWLAN, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new tx_voip_mixer_controls[] = {
@@ -3216,6 +3246,11 @@ static const struct snd_kcontrol_new tx_voip_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_Voip", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_VOIP, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_Voip", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_VOIP, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new tx_voice_stub_mixer_controls[] = {
@@ -3347,6 +3382,11 @@ static const struct snd_kcontrol_new tx_qchat_mixer_controls[] = {
 	SOC_SINGLE_EXT("TERT_MI2S_TX_QCHAT", MSM_BACKEND_DAI_TERTIARY_MI2S_TX,
 	MSM_FRONTEND_DAI_QCHAT, 1, 0, msm_routing_get_voice_mixer,
 	msm_routing_put_voice_mixer),
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	SOC_SINGLE_EXT("QUAT_MI2S_TX_QCHAT", MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+	MSM_FRONTEND_DAI_QCHAT, 1, 0, msm_routing_get_voice_mixer,
+	msm_routing_put_voice_mixer),
+#endif
 };
 
 static const struct snd_kcontrol_new sbus_0_rx_port_mixer_controls[] = {
@@ -3649,10 +3689,10 @@ static int msm_routing_put_stereo_to_custom_stereo_control(
 	int flag = 0, i = 0, rc = 0, idx = 0;
 	int be_index = 0, port_id, topo_id;
 	unsigned int session_id = 0;
-	uint16_t op_FL_ip_FL_weight = 0;
-	uint16_t op_FL_ip_FR_weight = 0;
-	uint16_t op_FR_ip_FL_weight = 0;
-	uint16_t op_FR_ip_FR_weight = 0;
+	uint16_t op_FL_ip_FL_weight;
+	uint16_t op_FL_ip_FR_weight;
+	uint16_t op_FR_ip_FL_weight;
+	uint16_t op_FR_ip_FR_weight;
 	flag = ucontrol->value.integer.value[0];
 	pr_debug("%s E flag %d\n", __func__, flag);
 
@@ -4214,9 +4254,12 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 	SND_SOC_DAPM_MUX("LSM6 MUX", SND_SOC_NOPM, 0, 0, &lsm6_mux),
 	SND_SOC_DAPM_MUX("LSM7 MUX", SND_SOC_NOPM, 0, 0, &lsm7_mux),
 	SND_SOC_DAPM_MUX("LSM8 MUX", SND_SOC_NOPM, 0, 0, &lsm8_mux),
+#if defined(CONFIG_L8720_COMMON)  || defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)
+// None.	xuke @ 20141212	For CODEC WM8998.
+#else
 	SND_SOC_DAPM_MUX("SLIM_0_RX AANC MUX", SND_SOC_NOPM, 0, 0,
 			aanc_slim_0_rx_mux),
-
+#endif
 	/* Mixer definitions */
 	SND_SOC_DAPM_MIXER("PRI_RX Audio Mixer", SND_SOC_NOPM, 0, 0,
 	pri_i2s_rx_mixer_controls, ARRAY_SIZE(pri_i2s_rx_mixer_controls)),
@@ -4644,6 +4687,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"MultiMedia5 Mixer", "MI2S_TX", "MI2S_TX"},
 	{"MultiMedia1 Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
 	{"MultiMedia2 Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150416	Fix the mic issue for VoIP.
+	{"MultiMedia5 Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
+	{"MultiMedia6 Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
+#endif
 	{"MultiMedia1 Mixer", "TERT_MI2S_TX", "TERT_MI2S_TX"},
 	{"MultiMedia1 Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
 	{"MultiMedia1 Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
@@ -4959,6 +5006,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"Voice_Tx Mixer", "PRI_MI2S_TX_Voice", "PRI_MI2S_TX"},
 	{"Voice_Tx Mixer", "MI2S_TX_Voice", "MI2S_TX"},
 	{"Voice_Tx Mixer", "TERT_MI2S_TX_Voice", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH) //yht,0323
+	{"Voice_Tx Mixer", "QUAT_MI2S_TX_Voice", "QUAT_MI2S_TX"},
+#endif
 	{"Voice_Tx Mixer", "SLIM_0_TX_Voice", "SLIMBUS_0_TX"},
 	{"Voice_Tx Mixer", "INTERNAL_BT_SCO_TX_Voice", "INT_BT_SCO_TX"},
 	{"Voice_Tx Mixer", "AFE_PCM_TX_Voice", "PCM_TX"},
@@ -4970,6 +5020,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"Voice2_Tx Mixer", "PRI_MI2S_TX_Voice2", "PRI_MI2S_TX"},
 	{"Voice2_Tx Mixer", "MI2S_TX_Voice2", "MI2S_TX"},
 	{"Voice2_Tx Mixer", "TERT_MI2S_TX_Voice2", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150411	Fix mic for SIM2.
+	{"Voice2_Tx Mixer", "QUAT_MI2S_TX_Voice2", "QUAT_MI2S_TX"},
+#endif
 	{"Voice2_Tx Mixer", "SLIM_0_TX_Voice2", "SLIMBUS_0_TX"},
 	{"Voice2_Tx Mixer", "INTERNAL_BT_SCO_TX_Voice2", "INT_BT_SCO_TX"},
 	{"Voice2_Tx Mixer", "AFE_PCM_TX_Voice2", "PCM_TX"},
@@ -4986,6 +5039,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VoLTE_Tx Mixer", "MI2S_TX_VoLTE", "MI2S_TX"},
 	{"VoLTE_Tx Mixer", "PRI_MI2S_TX_VoLTE", "PRI_MI2S_TX"},
 	{"VoLTE_Tx Mixer", "TERT_MI2S_TX_VoLTE", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	{"VoLTE_Tx Mixer", "QUAT_MI2S_TX_VoLTE", "QUAT_MI2S_TX"},
+#endif
 	{"VoLTE_UL", NULL, "VoLTE_Tx Mixer"},
 
 	{"VoWLAN_Tx Mixer", "PRI_TX_VoWLAN", "PRI_I2S_TX"},
@@ -4997,11 +5053,17 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VoWLAN_Tx Mixer", "MI2S_TX_VoWLAN", "MI2S_TX"},
 	{"VoWLAN_Tx Mixer", "PRI_MI2S_TX_VoWLAN", "PRI_MI2S_TX"},
 	{"VoWLAN_Tx Mixer", "TERT_MI2S_TX_VoWLAN", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	{"VoWLAN_Tx Mixer", "QUAT_MI2S_TX_VoWLAN", "QUAT_MI2S_TX"},
+#endif
 	{"VoWLAN_UL", NULL, "VoWLAN_Tx Mixer"},
 
 	{"Voip_Tx Mixer", "PRI_TX_Voip", "PRI_I2S_TX"},
 	{"Voip_Tx Mixer", "MI2S_TX_Voip", "MI2S_TX"},
 	{"Voip_Tx Mixer", "TERT_MI2S_TX_Voip", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	{"Voip_Tx Mixer", "QUAT_MI2S_TX_Voip", "QUAT_MI2S_TX"},
+#endif
 	{"Voip_Tx Mixer", "SLIM_0_TX_Voip", "SLIMBUS_0_TX"},
 	{"Voip_Tx Mixer", "INTERNAL_BT_SCO_TX_Voip", "INT_BT_SCO_TX"},
 	{"Voip_Tx Mixer", "AFE_PCM_TX_Voip", "PCM_TX"},
@@ -5099,6 +5161,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"QCHAT_Tx Mixer", "MI2S_TX_QCHAT", "MI2S_TX"},
 	{"QCHAT_Tx Mixer", "PRI_MI2S_TX_QCHAT", "PRI_MI2S_TX"},
 	{"QCHAT_Tx Mixer", "TERT_MI2S_TX_QCHAT", "TERT_MI2S_TX"},
+#if defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)	// xuke @ 20150414	Fix the mic issue for VoIP.
+	{"QCHAT_Tx Mixer", "QUAT_MI2S_TX_QCHAT", "QUAT_MI2S_TX"},
+#endif
 	{"QCHAT_UL", NULL, "QCHAT_Tx Mixer"},
 
 	{"INT_FM_RX", NULL, "INTFM_DL_HL"},
@@ -5117,13 +5182,17 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"PRI_MI2S_RX", NULL, "PRI_MI2S_RX_DL_HL"},
 
 	{"QUAT_MI2S_RX_DL_HL", "Switch", "QUAT_MI2S_DL_HL"},
-	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_DL_HL"},
+	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL"},
 	{"MI2S_UL_HL", NULL, "TERT_MI2S_TX"},
 	{"TERT_MI2S_UL_HL", NULL, "TERT_MI2S_TX"},
 	{"SEC_I2S_RX", NULL, "SEC_I2S_DL_HL"},
 	{"PRI_MI2S_UL_HL", NULL, "PRI_MI2S_TX"},
 	{"SEC_MI2S_RX", NULL, "SEC_MI2S_DL_HL"},
 	{"PRI_MI2S_RX", NULL, "PRI_MI2S_DL_HL"},
+#if 1	// xuke 20141225	Import FM patch.
+	{"QUAT_MI2S_RX_DL_HL", "Switch", "QUAT_MI2S_DL_HL"},
+	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_DL_HL"},
+#endif
 	{"QUAT_MI2S_UL_HL", NULL, "QUAT_MI2S_TX"},
 
 	{"SLIMBUS_0_RX Port Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
@@ -5196,7 +5265,11 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SLIMBUS_1_RX Mixer", "VoLTE Stub", "VOLTE_STUB_DL"},
 	{"SLIMBUS_1_RX", NULL, "SLIMBUS_1_RX Mixer"},
 	{"INTERNAL_BT_SCO_RX_Voice Mixer", "Voice Stub", "VOICE_STUB_DL"},
+#if defined(CONFIG_L8720_COMMON) || defined(CONFIG_AUDIO_CODEC_FLORIDA) || defined(CONFIG_AUDIO_CODEC_WM8998_SWITCH)
+// None.	xuke @ 20141212	For CODEC WM8998.
+#else
 	{"INTERNAL_BT_SCO_RX_Voice Mixer", "Voice2 Stub", "VOICE2_STUB_DL"},
+#endif
 	{"AFE_PCM_RX_Voice Mixer", "Voice Stub", "VOICE_STUB_DL"},
 	{"AFE_PCM_RX_Voice Mixer", "Voice2 Stub", "VOICE2_STUB_DL"},
 	{"AFE_PCM_RX_Voice Mixer", "VoLTE Stub", "VOLTE_STUB_DL"},
@@ -5349,20 +5422,16 @@ static int msm_pcm_routing_close(struct snd_pcm_substream *substream)
 		fdai = &fe_dai_map[i][session_type];
 		if (fdai->strm_id != INVALID_SESSION) {
 			int idx;
-			int port_id;
 			unsigned long copp =
 				session_copp_map[i][session_type][be_id];
 			for (idx = 0; idx < MAX_COPPS_PER_PORT; idx++)
 				if (test_bit(idx, &copp))
 					break;
 			fdai->be_srate = bedai->sample_rate;
-			port_id = bedai->port_id;
-			topology= adm_get_topology_for_port_copp_idx(port_id,
-								     idx);
+			topology = msm_routing_get_adm_topology(path_type, i);
 			adm_close(bedai->port_id, fdai->perf_mode, idx);
-			pr_debug("%s: copp:%ld,idx bit fe:%d, type:%d,be:%d topology=0x%x\n",
-				 __func__, copp, i, session_type, be_id,
-				 topology);
+			pr_debug("%s: copp:%ld,idx bit fe:%d, type:%d,be:%d\n",
+				 __func__, copp, i, session_type, be_id);
 			clear_bit(idx,
 				  &session_copp_map[i][session_type][be_id]);
 			if ((fdai->perf_mode == LEGACY_PCM_MODE) &&
@@ -5457,14 +5526,16 @@ static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 			channels = bedai->channel;
 			acdb_dev_id = fe_dai_app_type_cfg[i].acdb_dev_id;
 			topology = msm_routing_get_adm_topology(path_type, i);
+			if (bedai->port_id == VOICE_RECORD_RX ||
+			    bedai->port_id == VOICE_RECORD_TX)
+				topology = NULL_COPP_TOPOLOGY;
 			copp_idx = adm_open(bedai->port_id, path_type,
 					    sample_rate, channels, topology,
 					    fdai->perf_mode, bits_per_sample,
 					    app_type, acdb_dev_id);
-			if ((copp_idx < 0) ||
+			if ((copp_idx < 0) &&
 				(copp_idx >= MAX_COPPS_PER_PORT)) {
 				pr_err("%s: adm open failed\n", __func__);
-				mutex_unlock(&routing_lock);
 				return -EINVAL;
 			}
 			pr_debug("%s: setting idx bit of fe:%d, type: %d, be:%d\n",
@@ -5598,7 +5669,7 @@ static int msm_routing_put_device_pp_params_mixer(struct snd_kcontrol *kcontrol,
 			if (!test_bit(idx, &copp))
 				continue;
 			topo_id = adm_get_topology_for_port_copp_idx(port_id,
-								     idx);
+								     copp);
 			if (topo_id != COMPRESSED_PASSTHROUGH_DEFAULT_TOPOLOGY)
 				continue;
 		pr_debug("%s: port: 0x%x, copp %ld, be active: %d, passt: %d\n",

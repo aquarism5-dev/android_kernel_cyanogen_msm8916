@@ -530,15 +530,6 @@ static int soc_ac97_dev_register(struct snd_soc_codec *codec)
 }
 #endif
 
-static void codec2codec_close_delayed_work(struct work_struct *work)
-{
-	/* Currently nothing to do for c2c links
-	 * Since c2c links are internal nodes in the DAPM graph and
-	 * don't interface with the outside world or application layer
-	 * we don't have to do any special handling on close.
-	 */
-}
-
 #ifdef CONFIG_PM_SLEEP
 /* powers down audio subsystem for suspend */
 int snd_soc_suspend(struct device *dev)
@@ -1169,8 +1160,7 @@ static int soc_probe_platform(struct snd_soc_card *card,
 
 	/* Create DAPM widgets for each DAI stream */
 	list_for_each_entry(dai, &dai_list, list) {
-		if (dai->dev != platform->dev ||
-		    dai->playback_widget || dai->capture_widget)
+		if (dai->dev != platform->dev)
 			continue;
 
 		snd_soc_dapm_new_dai_widgets(&platform->dapm, dai);
@@ -1439,9 +1429,6 @@ static int soc_probe_link_dais(struct snd_soc_card *card, int num, int order)
 				return ret;
 			}
 		} else {
-			INIT_DELAYED_WORK(&rtd->delayed_work,
-						codec2codec_close_delayed_work);
-
 			/* link the DAI widgets */
 			play_w = codec_dai->playback_widget;
 			capture_w = cpu_dai->capture_widget;
@@ -2116,6 +2103,14 @@ unsigned int snd_soc_read(struct snd_soc_codec *codec, unsigned int reg)
 {
 	unsigned int ret;
 
+
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)	//yht
+	if (unlikely(!snd_card_is_online_state(codec->card->snd_card))) {
+		dev_err(codec->dev, "read 0x%02x while offline\n", reg);
+		return -ENODEV;
+	}
+#endif
+
 	ret = codec->read(codec, reg);
 	dev_dbg(codec->dev, "read %x => %x\n", reg, ret);
 	trace_snd_soc_reg_read(codec, reg, ret);
@@ -2127,6 +2122,12 @@ EXPORT_SYMBOL_GPL(snd_soc_read);
 unsigned int snd_soc_write(struct snd_soc_codec *codec,
 			   unsigned int reg, unsigned int val)
 {
+#if defined(CONFIG_AUDIO_CODEC_FLORIDA)	//yht
+	if (unlikely(!snd_card_is_online_state(codec->card->snd_card))) {
+		dev_err(codec->dev, "write 0x%02x while offline\n", reg);
+		return -ENODEV;
+	}
+#endif
 	dev_dbg(codec->dev, "write %x = %x\n", reg, val);
 	trace_snd_soc_reg_write(codec, reg, val);
 	return codec->write(codec, reg, val);
@@ -3134,11 +3135,11 @@ int snd_soc_bytes_get(struct snd_kcontrol *kcontrol,
 			break;
 		case 2:
 			((u16 *)(&ucontrol->value.bytes.data))[0]
-				&= cpu_to_be16(~params->mask);
+				&= ~params->mask;
 			break;
 		case 4:
 			((u32 *)(&ucontrol->value.bytes.data))[0]
-				&= cpu_to_be32(~params->mask);
+				&= ~params->mask;
 			break;
 		default:
 			return -EINVAL;
@@ -3207,18 +3208,6 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_bytes_put);
-
-int snd_soc_bytes_info_ext(struct snd_kcontrol *kcontrol,
-			struct snd_ctl_elem_info *ucontrol)
-{
-	struct soc_bytes_ext *params = (void *)kcontrol->private_value;
-
-	ucontrol->type = SNDRV_CTL_ELEM_TYPE_BYTES;
-	ucontrol->count = params->max;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(snd_soc_bytes_info_ext);
 
 /**
  * snd_soc_info_xr_sx - signed multi register info callback
