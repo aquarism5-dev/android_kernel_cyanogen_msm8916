@@ -122,7 +122,7 @@ static int hbtp_input_create_input_dev(struct hbtp_input_absinfo *absinfo)
 	__set_bit(BTN_TOUCH, input_dev->keybit);
 	__set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
 
-	for (i = KEY_HOME; i <= KEY_MICMUTE; i++)
+	for (i = KEY_ESC; i <= KEY_MICMUTE; i++)
 		__set_bit(i, input_dev->keybit);
 
 	/* For multi touch */
@@ -243,7 +243,7 @@ reg_off:
 static long hbtp_input_ioctl_handler(struct file *file, unsigned int cmd,
 				 unsigned long arg, void __user *p)
 {
-	int error = 0;
+	int error;
 	struct hbtp_input_mt mt_data;
 	struct hbtp_input_absinfo absinfo[ABS_MT_LAST - ABS_MT_FIRST + 1];
 	struct hbtp_input_key key_data;
